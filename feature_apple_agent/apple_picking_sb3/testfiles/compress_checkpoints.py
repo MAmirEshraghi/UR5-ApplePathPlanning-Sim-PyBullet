@@ -2,23 +2,23 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-from pruning_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
-from pruning_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAE
-from pruning_sb3.pruning_gym.models import AutoEncoder
+from apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
+from apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAE
+from apple_picking_sb3.pruning_gym.models import AutoEncoder
 
-from pruning_sb3.pruning_gym.callbacks.eval_callbacks import PruningEvalSetGoalCallback, PruningEvalRecordEnvCallback, \
+from apple_picking_sb3.pruning_gym.callbacks.eval_callbacks import PruningEvalSetGoalCallback, PruningEvalRecordEnvCallback, \
     PruningLogResultCallback, GenerateResults
 
-from pruning_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
 
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
 from stable_baselines3.common import utils
 from stable_baselines3.common.env_util import make_vec_env
 import argparse
-from pruning_sb3.args.args import \
+from apple_picking_sb3.args.args import \
     args
-from pruning_sb3.pruning_gym.helpers import set_args, organize_args, make_or_bins, \
+from apple_picking_sb3.pruning_gym.helpers import set_args, organize_args, make_or_bins, \
     get_policy_kwargs
 import pickle
 

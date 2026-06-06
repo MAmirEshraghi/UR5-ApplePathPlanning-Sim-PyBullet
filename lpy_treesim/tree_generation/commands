@@ -1,0 +1,5 @@
+python3 ./tree_generation/make_n_trees.py --num_trees 1 --output_dir dataset/new --lpy_file examples/Camp_Envy_tie_prune_label.lpy
+
+python3 ./tree_generation/convert_ply_to_obj.py --output_dir dataset/new --input_dir dataset/new
+
+

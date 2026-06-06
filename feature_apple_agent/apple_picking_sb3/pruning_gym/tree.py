@@ -8,10 +8,10 @@ import numpy as np
 import pybullet
 import pywavefront
 from nptyping import NDArray, Shape, Float
-from pruning_sb3.pruning_gym.helpers import compute_perpendicular_projection_vector
+from apple_picking_sb3.pruning_gym.helpers import compute_perpendicular_projection_vector
 from collections import defaultdict
-from pruning_sb3.pruning_gym import label
-from pruning_sb3.pruning_gym.helpers import roundup, rounddown
+from apple_picking_sb3.pruning_gym import label
+from apple_picking_sb3.pruning_gym.helpers import roundup, rounddown
 # from memory_profiler import profile
 
 class Tree:

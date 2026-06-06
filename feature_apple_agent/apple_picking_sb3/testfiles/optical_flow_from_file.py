@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from pruning_sb3.pruning_gym.optical_flow import OpticalFlow
+from apple_picking_sb3.pruning_gym.optical_flow import OpticalFlow
 import matplotlib.pyplot as plt
 
 import numpy as np

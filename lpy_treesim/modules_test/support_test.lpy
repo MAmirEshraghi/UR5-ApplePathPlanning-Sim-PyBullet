@@ -1,0 +1,42 @@
+import sys
+sys.path.append('../')
+from stochastic_tree import Support
+import numpy as np
+def generate_points_v_trellis():
+  x = np.full((7,), 18).astype(float)
+  z = np.arange(0, 21, 3).astype(float)
+  y = np.full((7,), 0).astype(float)
+  pts = []
+  id = 0
+  for i in range(x.shape[0]):
+    pts.append((-x[i], y[i], z[i]))
+    id+=1
+    pts.append((x[i], y[i], z[i]))
+    id+=1
+  return pts
+    
+def generate_points_ufo():
+  x = np.arange(0, 21, 3).astype(float)
+  z = np.full((7,), 18).astype(float)
+  y = np.full((7,), 0).astype(float)
+  pts = []
+  id = 0
+  for i in range(x.shape[0]):
+    pts.append((x[i], y[i], z[i]))
+    id+=1
+   
+  return pts
+  
+
+supp = Support(generate_points_v_trellis(), 1,1,(1,2,3), (0,0,1), (0,1,0))
+#print(generate_points_ufo())
+module Attractors
+
+Axiom: Attractors(supp)
+derivation length: 1
+
+production:   
+Attractors(support):
+  pttodisplay = support.attractor_grid.get_enabled_points()
+  if len(pttodisplay) > 0:
+    produce [,(3) @g(PointSet(pttodisplay,width=10))]

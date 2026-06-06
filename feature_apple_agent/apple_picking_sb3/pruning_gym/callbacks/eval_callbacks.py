@@ -6,7 +6,7 @@ import cv2
 import imageio
 import numpy as np
 import pandas as pd
-from pruning_sb3.pruning_gym.callbacks.callbacks import PruningSetGoalCallback
+from apple_picking_sb3.pruning_gym.callbacks.callbacks import PruningSetGoalCallback
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import VecEnv, DummyVecEnv

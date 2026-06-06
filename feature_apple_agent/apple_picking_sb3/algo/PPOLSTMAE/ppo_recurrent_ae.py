@@ -1,4 +1,5 @@
 import glob
+import os
 import pickle
 import random
 import sys
@@ -602,17 +603,18 @@ class RecurrentPPOAE(OnPolicyAlgorithm):
 
 
 class TrajectoryIterableDataset(IterableDataset):
-    """ Returns numpy observations from the dataset stored in a single HDF5 file. """
+    """Load expert trajectories from one HDF5 file or all ``*.hdf5`` in a directory."""
 
     def __init__(self, hdf5_file_path, verbose=1):
         """
-        :param hdf5_file_path: Path to the single HDF5 file containing all trajectories
-        :param observation_space: Observation space of the environment
+        :param hdf5_file_path: Path to a single ``.hdf5`` file, or a directory of ``*.hdf5`` files.
         """
-        self.hdf5_file_path = hdf5_file_path
+        self.hdf5_file_path = os.path.abspath(os.path.expanduser(hdf5_file_path))
         self.verbose = verbose
-        # hdf5 files
-        self.hdf5_files = glob.glob(hdf5_file_path + '/*.hdf5')
+        if os.path.isfile(self.hdf5_file_path) and self.hdf5_file_path.lower().endswith(".hdf5"):
+            self.hdf5_files = [self.hdf5_file_path]
+        else:
+            self.hdf5_files = sorted(glob.glob(os.path.join(self.hdf5_file_path.rstrip(os.sep), "*.hdf5")))
         if self.verbose > 0:
             print(f"INFO: Found {len(self.hdf5_files)} HDF5 files")
             print(f"INFO: {self.hdf5_files}")
@@ -1041,8 +1043,8 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
         )
 
         bc_loss = -th.mean(log_prob_offline)
-        # Linearly scale the bc_loss
-        offline_loss = bc_loss * self.bc_coeff * self._current_progress_remaining
+        # Constant BC weight (was × progress_remaining, which faded imitation to ~0 by end of training).
+        offline_loss = bc_loss * self.bc_coeff
 
         # Calculate approximate form of reverse KL Divergence for early stopping
         # see issue #417: https://github.com/DLR-RM/stable-baselines3/issues/417
@@ -1606,15 +1608,16 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
         print("Learning with AWAC", self.use_awac)
         while self.num_timesteps < total_timesteps:
             # If timesteps > half of total timesteps, start using only online data
-            if self.num_timesteps > total_timesteps / 2:
-                print("**********Switching to Online Data**********")
-                print("**********Switching to Online Data**********")
-                self.use_online_data = True
-                self.use_offline_data = False
-                self.use_ppo_offline = False
-                self.use_online_bc = False
-                self.collect_online_data = True
-                self.collect_offline_data = False
+            # if self.num_timesteps > total_timesteps / 2:
+            #     print("**********Switching to Online Data**********")
+            #     print("**********Switching to Online Data**********")
+            #     self.use_online_data = True
+            #     self.use_offline_data = False
+            #     self.use_ppo_offline = False
+            #     self.use_online_bc = False
+            #     self.collect_online_data = True
+            #     self.collect_offline_data = False
+            
             if self.use_online_data or self.use_ppo_offline or self.use_online_bc or self.use_awac:
                 continue_training = self.collect_rollouts(self.env, callback, self.rollout_buffer,
                                                           n_rollout_steps=self.n_steps)

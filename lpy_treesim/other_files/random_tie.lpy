@@ -1,0 +1,390 @@
+"""
+Tying an envy apple tree without the use of BasicWood classes
+"""
+import sys
+sys.path.append('../')
+import random as rd
+import numpy as np
+from openalea.plantgl.all import *#Polyline2D, unitstep, freq
+from numpy import arange
+from openalea.lpy.parameterset import *
+from random import uniform, seed
+from math import pi
+from helper import *
+
+from openalea.plantgl.scenegraph.cspline import CSpline
+def gen_noise_branch3D(radius,nbp=20):
+    return  NurbsCurve([(0,0,0,1),(0,0,1/float(nbp-1),1)]+[(myrandom(radius*3),
+                                     myrandom(radius*amplitude(pt/float(nbp-1))),
+                                     pt/float(nbp-1),1) for pt in range(2,nbp)],
+                        degree=min(nbp-1,3),stride=nbp*100)
+import copy
+#Setup variables
+prune = True
+label = False
+curve_gui = False
+#l = LsystemParameters()
+#l.add_function('h', NurbsCurve2D([(0,0.1,1),(1/3,1,1),(2/3,1,1),(1,0,1)]))
+#Tree growth variables
+
+#Trunk guide variables
+L0 = 30
+freq = 30
+#rd.seed(0)
+order = 0
+branches = 0
+radius = 1
+radinc =    0.005 # increment of radius through time
+
+
+
+def deflection(d, x, L):
+  return (d/2)*(x**2)/(L**3+0.001)*(3*L - x)
+  #return d*(1 - np.cos(*np.pi*x/(2*L))) #Axial loading
+
+ 
+def get_ctrl(target, start, current):
+    pts = []
+    Lcurve = np.sqrt((start[0]-current[0])**2 + (current[1]-start[1])**2 + (current[2]-start[2])**2)   
+    
+    if Lcurve**2 - (target[1]-start[1])**2 - (target[2]-start[2])**2 < 0:
+      print("SHORT")
+      return pts,None
+    curve_end_x = np.sqrt(Lcurve**2 - (target[1]-start[1])**2 - (target[2]-start[2])**2)
+    i_target = [start[0]+target[0]/abs(target[0])*(curve_end_x), target[1], target[2]]
+    #print(Lcurve, start, current, i_target, target)
+    dxyz = np.array(i_target) - np.array(current)
+    dx = np.array(current) - np.array(start)
+    for i in range(1,10*int(Lcurve)+1):
+       x = i/(10*int(Lcurve))
+       d = deflection(dxyz, x*Lcurve, Lcurve)
+       pts.append(tuple((start[0]+x*dx[0]+d[0],start[1]+x*dx[1]+d[1],start[2]+x*dx[2]+d[2])))
+    return pts, i_target
+    
+def gen_noise_branch3D(radius,nbp=20):
+    return  NurbsCurve([(0,0,0,1),(0,0,1/float(nbp-1),1)]+[(myrandom(radius*3),
+                                     myrandom(radius*amplitude(pt/float(nbp-1))),
+                                     pt/float(nbp-1),1) for pt in range(2,nbp)],
+                        degree=min(nbp-1,3),stride=nbp*100)
+
+class branch():
+  def __init__(self, id):
+    self.start = Vector3(0,0,0)
+    self.end = Vector3(0,0,0)
+    self.id = id
+    self.last_tie = Vector3(0,0,0)
+    self.first_tie = False
+    self.guide = []
+    self.tied = False
+    self.age = 0
+    self.guide_target = -1#Vector3(0,0,0)
+    self.cut = False
+    
+  def decompose(self):
+    self.curr_string = []
+    return self.curr_string
+    
+  @staticmethod
+  def bend_energy(deflection, length):
+    energy = 0
+    for i in deflection:
+      energy+= abs(i)/(length**3)#3EId/l**3 ->Considering even thickness
+    return energy
+
+
+class wire:
+  def __init__(self, id, pt):
+    self.num_branches = 0
+    self.pt = pt
+    self.id = id
+    
+  def add_branch(self):
+    self.num_branches+=1
+    
+class trellis:
+  def __init__(self, num_wires = 7, space_wires = 3, vert_length = 21):
+    self.num_wires = num_wires
+    self.space_wires = space_wires
+    self.vert_length = vert_length
+    self.trellis_pts = self.generate_points() #Dictionary id:points
+    pts = [i.pt for i in self.trellis_pts.values()]
+    self.attractor_grid = Point3Grid((1,1,1),list(pts))
+  
+  def generate_points(self):
+    x = np.full((self.num_wires,), 18).astype(float)
+    z = np.arange(0, self.vert_length, self.space_wires).astype(float)
+    y = np.full((self.num_wires,), 0).astype(float)
+    pts = {}
+    id = 0
+    for i in range(x.shape[0]):
+      pts[id] = wire(id, Vector3(-x[i], y[i], z[i]))
+      id+=1
+      pts[id] = wire(id, Vector3(x[i], y[i], z[i]))
+      id+=1
+    return pts
+   
+    
+def ed(a,b):
+  return (a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2
+  
+def tie_down(lstring): #
+  global branch_dict, trellis_wires
+  tied = False
+  for j,i in enumerate(lstring):
+    if i.name == 'C' and branch_dict[i[0].branch_id].tied == False and i[0].age > 7 and i[0].age < 21 :
+      curve = []
+      curr_branch = branch_dict[i[0].branch_id]
+      i[0].tied = True
+      branch_dict[i[0].branch_id].tied = True
+      print('tying', i[0].branch_id)
+      first = True
+      #Find target by closest point
+      if curr_branch.first_tie == False:
+        min_energy = 999999
+        min_energy_pt = -1
+        for k,v in trellis_wires.trellis_pts.items():
+          #deflection = v - curr_branch.end
+          energy = ed(v.pt,curr_branch.end)+ed(v.pt,curr_branch.start)+v.num_branches*10#branch.bend_energy(deflection, curr_branch.age)
+          if energy < min_energy:
+            min_energy = energy
+            min_energy_wire = v
+        curr_branch.guide_target = min_energy_wire.pt
+        min_energy_wire.num_branches+=1
+        print(min_energy_wire.id, min_energy_wire.num_branches)
+      try:
+        if branch_dict[i[0].branch_id].first_tie == False:
+          print("First Tie")
+          curve, i_target = get_ctrl(curr_branch.guide_target, branch_dict[i[0].branch_id].start , branch_dict[i[0].branch_id].end)
+        else:
+          curve, i_target= get_ctrl(curr_branch.guide_target, branch_dict[i[0].branch_id].last_tie , branch_dict[i[0].branch_id].end)
+          first = False
+      except Exception as e:
+        print("ERROR", str(e))  
+      branch_dict[i[0].branch_id].guide.extend(curve)
+      if branch_dict[i[0].branch_id].guide:      
+        spline = CSpline(branch_dict[i[0].branch_id].guide) 
+        
+        branch_dict[i[0].branch_id].first_tie = True
+        branch_dict[i[0].branch_id].last_tie = copy.deepcopy(Vector3(i_target))
+      #del(lstring[j+1])
+        length = (branch_dict[i[0].branch_id].age)
+        lstring.insertAt(j+1, SetGuide(spline.curve(),length))
+        if first:
+          del(lstring[j+2])
+        del(lstring[j+2])
+        
+        tied = True      
+        break
+  if tied == True:
+      tie_down(lstring)
+      
+  return lstring
+      
+def tie_decision(): #
+  global branch_dict, trellis_wires
+  num_branches = len(list(branch_dict.values()))
+  num_wires = len(list(trellis_wires.trellis_pts.values()))
+  energy_matrix = np.ones((num_branches,num_wires))*np.inf
+  print(energy_matrix.shape)
+  for (branch_id, branch) in branch_dict.items():
+    if branch.first_tie:
+      continue
+    for wire_id, wire in trellis_wires.trellis_pts.items():
+      energy_matrix[branch_id][wire_id] = ed(wire.pt,branch.end)/2+ed(wire.pt,branch.start)/2#+v.num_branches*10+branch.bend_energy(deflection, curr_branch.age)
+  return energy_matrix
+
+def tie_down2(energy_matrix):
+  global branch_dict, trellis_wires 
+  for i in range(energy_matrix.shape[0]):
+    min_arg = np.argwhere(energy_matrix == np.min(energy_matrix))
+    #print(min_arg)
+    if(energy_matrix[min_arg[0][0]][min_arg[0][1]] == np.inf):
+      return
+    if not (branch_dict[min_arg[0][0]].first_tie == True or trellis_wires.trellis_pts[min_arg[0][1]].num_branches >=1):# or energy_matrix[min_arg[0][0]][min_arg[0][1]]>100000):
+      print("Imp:",min_arg[0][0], min_arg[0][1], energy_matrix[min_arg[0][0]][min_arg[0][1]])
+      branch_dict[min_arg[0][0]].guide_target = copy.deepcopy(trellis_wires.trellis_pts[min_arg[0][1]].pt)
+      trellis_wires.trellis_pts[min_arg[0][1]].num_branches+=1
+      for j in range(energy_matrix.shape[1]):
+        energy_matrix[min_arg[0][0]][j] = np.inf
+      for j in range(energy_matrix.shape[0]):
+        energy_matrix[j][min_arg[0][1]] = np.inf
+    #print(energy_matrix)
+  
+prune = True    
+def pruning_strategy(it, lstring):
+  cut = False
+  for j,i in enumerate(lstring):
+    if i.name == 'C' and i[0].age > 14 and branch_dict[i[0].branch_id].first_tie == False and  branch_dict[i[0].branch_id].cut == False:
+      branch_dict[i[0].branch_id].cut = True      
+      print("Cutting", i[0].branch_id) 
+      lstring = cut_from(j, lstring)
+      cut = True
+      break
+  if cut:
+    lstring = pruning_strategy(it, lstring)
+  return lstring
+  
+    
+def tie(lstring):
+  global branch_dict, trellis_wires
+  tied = False
+  for j,i in enumerate(lstring):
+    if i.name == 'C' and i[0].age > 7 and branch_dict[i[0].branch_id].tied == False and i[0].age < 21:
+      curve = []
+      curr_branch = branch_dict[i[0].branch_id]
+      if branch_dict[i[0].branch_id].guide_target == -1:
+        print('not tying', i[0].branch_id)
+        continue
+      i[0].tied = True
+      branch_dict[i[0].branch_id].tied = True
+      print('tying', i[0].branch_id)
+      first = True
+      #Find target by closest point
+      try:
+        if branch_dict[i[0].branch_id].first_tie == False:
+          print("First Tie")
+          curve, i_target = get_ctrl(curr_branch.guide_target, branch_dict[i[0].branch_id].start , branch_dict[i[0].branch_id].end)
+        else:
+          curve, i_target= get_ctrl(curr_branch.guide_target, branch_dict[i[0].branch_id].last_tie , branch_dict[i[0].branch_id].end)
+          first = False
+      except Exception as e:
+        print("ERROR", str(e))  
+      branch_dict[i[0].branch_id].guide.extend(curve)
+      if branch_dict[i[0].branch_id].guide:      
+        spline = CSpline(branch_dict[i[0].branch_id].guide) 
+        
+        branch_dict[i[0].branch_id].first_tie = True
+        branch_dict[i[0].branch_id].last_tie = copy.deepcopy(Vector3(i_target))
+      #del(lstring[j+1])
+        length = (branch_dict[i[0].branch_id].age)
+        lstring.insertAt(j+1, SetGuide(spline.curve(),length))
+        if first:
+          del(lstring[j+2])
+        del(lstring[j+2])
+        
+        tied = True      
+        break
+  if tied == True:
+      tie(lstring)
+      
+  return lstring
+      
+      
+      
+#Prune at end of specified iteration according to pruning_strategy
+def StartEach(lstring):
+  for i in range(branches):
+    branch_dict[i].tied = False
+  #branch_dict[0].tied = False
+  if getIterationNb()%4 == 0:
+    em = tie_decision()
+    tie_down2(em)
+    lstring = tie(lstring)
+  
+  global prune
+  frameDisplay(True)
+  if not prune:
+    return lstring
+  if getIterationNb()%4 == 0:
+    lstring = pruning_strategy(getIterationNb(), lstring) #Overwrite this function
+  return lstring
+  
+
+branch_dict = {}
+#for i in range(14):
+  
+trellis_wires = trellis()
+print(trellis_wires.trellis_pts)
+
+
+
+
+module A # represent trunk apical meristem
+module B # represent apical meristem of lateral branches
+module I # Internode
+module O
+module C # Mark branches
+module Attractors
+
+Axiom: Attractors(trellis_wires)A(1,0)
+
+derivation length: 50
+a = Vector3()
+
+production:
+A(t,o) :
+  global branches, branch_dict,a
+  if t <= 21:
+     # simply produces a metamer and ages the apex
+     if label:
+	     nproduce  SetColor(3)
+     nproduce I(1,0.05)
+     if rd.random()>0.33:
+       
+       if label:
+       	nproduce SetColor(2)
+       if curve_gui:
+	       branches+=1
+	       nproduce [SetGuide(globals()["path_"+str(branches)],L0)&(90)B(0)]
+	       branches+=1       
+	       nproduce [SetGuide(globals()["path_"+str(branches)],L0)&(270)B(0)]
+       else:
+          branch_dict[branches] = branch(branches)
+          nproduce [C(ParameterSet(branch_id = branches, tied = False, age = 0))/(myrandom(1)*90)&(myrandom(1)*90)GetPos(branch_dict[branches].start)B(0, branches)GetPos(branch_dict[branches].end)]
+          branches+=1
+          branch_dict[branches] = branch(branches)
+          nproduce [C(ParameterSet(branch_id = branches, tied = False, age = 0))/(myrandom(1)*90)&(myrandom(1)*90)GetPos(branch_dict[branches].start)B(0, branches)GetPos(branch_dict[branches].end)]
+          branches+=1
+         
+     produce A(t+1,o)
+       
+C(p):
+  global branch_dict
+  p.age+=1
+  branch_dict[p.branch_id].age+=1
+  branch_dict[p.branch_id].age = min(branch_dict[p.branch_id].age,21)
+  
+Attractors(trellis) :
+  pttodisplay = trellis.attractor_grid.get_enabled_points()
+  if len(pttodisplay) > 0:
+    produce [,(3) @g(PointSet(pttodisplay,width=20))]
+
+S(s,r) :
+  if order == 2:
+    if myrandom(0.5)+0.5 < 0.15:
+    	nproduce [&(myrandom(1)*180)I(0.5, 0.005)]
+  produce F(s,r)S(s,r)
+  
+B(l, b):
+  global branch_dict
+  if l < 25: #Max branch length
+    if True:
+      nproduce I(1,0.001)
+      if label:
+        nproduce [SetColor(4)&(myrandom(1)*180)S(0.05,0.1)]B(l+1)
+      else:
+        if order >= 1:
+        	nproduce [&(myrandom(1)*180)S(0.05,0.1)]B(l+1)
+        else:
+          produce B(l+1,b)
+    else:
+      produce I(0.1,0.01)B(l+1)
+  else:
+    produce *   	
+    
+# Increment radius of internodes
+I(s,r) --> I(s,r+radinc)
+S(s,r) --> S(s, r+radinc)
+_(r) --> _(r+radinc)
+
+homomorphism:
+
+I(a,r) --> F(a,r)
+S(a,r) --> F(a,r)
+ 
+###### INITIALISATION ######
+
+__lpy_code_version__ = 1.1
+
+def __initialiseContext__(context):
+	context.animation_timestep = 0.15

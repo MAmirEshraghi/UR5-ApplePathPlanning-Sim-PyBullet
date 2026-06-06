@@ -6,11 +6,11 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.
 from gymnasium import spaces
 import pytest
 import torch as th
-from pruning_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
-from pruning_sb3.pruning_gym.models import AutoEncoder
+from apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
+from apple_picking_sb3.pruning_gym.models import AutoEncoder
 import numpy as np
 
-from pruning_sb3.pruning_gym.running_mean_std import RunningMeanStd as rms
+from apple_picking_sb3.pruning_gym.running_mean_std import RunningMeanStd as rms
 
 
 @pytest.fixture

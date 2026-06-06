@@ -1,0 +1,159 @@
+import sys
+sys.path.append('../')
+from stochastic_tree import Support, BasicWood
+import numpy as np
+import random as rd
+import copy
+import gc
+import time
+# Define basic comoponents such as trunk, branch, spurs, etc.
+# DeepCopy them and construct tree
+# Examples as a dictionary that can be decomposed
+# Define probability function for bud break
+# Add spur class, transition between branch and spur
+# Order important
+# Add counting
+# Factory class
+# Add all to tree
+# Remove tree
+basicwood_prototypes = {}
+
+
+class Spur(BasicWood):
+  count = 0
+  def __init__(self, copy_from = None, max_buds_segment: int = 5, thickness: float = 0.1,\
+               thickness_increment: float = 0.01, growth_length: float = 1., max_length: float = 7.,\
+               tie_axis: tuple = (0,1,1), order: int = 1, prototype_dict: dict = {}, name = None):
+    super().__init__(copy_from, max_buds_segment,thickness, thickness_increment, growth_length,\
+               max_length, tie_axis,  order)
+    if copy_from:
+      self.__copy_constructor__(copy_from)
+    else:
+      self.prototype_dict = prototype_dict    
+    if not name:
+      self.name = str(self.__class__.__name__) +'_'+ str(self.__class__.count)           
+    Spur.count+=1
+    
+  def is_bud_break(self, num_buds_segment):
+      return 0
+    
+  def create_branch(self):
+      return None
+      
+  def grow(self):
+    pass
+      
+class Branch(BasicWood):
+  count = 0
+  def __init__(self,copy_from = None,  max_buds_segment: int = 5, thickness: float = 0.1,\
+               thickness_increment: float = 0.01, growth_length: float = 1., max_length: float = 7.,\
+               tie_axis: tuple = (0,1,1), order: int = 1, prototype_dict: dict = {}, name = None):
+    
+    super().__init__(copy_from, max_buds_segment,thickness, thickness_increment, growth_length,\
+               max_length, tie_axis,  order)
+    if copy_from:
+      self.__copy_constructor__(copy_from)
+    else:
+      self.prototype_dict = prototype_dict        
+        
+    if not name:
+      self.name = str(self.__class__.__name__) +'_'+ str(self.__class__.count)      
+    Branch.count+=1
+               
+  def is_bud_break(self, num_buds_segment):
+      return (rd.random() < 0.1*(1 - num_buds_segment/self.max_buds_segment))
+    
+  def create_branch(self):
+      return Spur(copy_from = self.prototype_dict['spur'])
+  
+  def grow(self):
+    pass
+    
+    
+class Trunk(BasicWood):
+  count = 0
+  """ Details of the trunk while growing a tree, length, thickness, where to attach them etc """
+  def __init__(self, copy_from = None, max_buds_segment: int = 5, thickness: float = 0.1,\
+               thickness_increment: float = 0.01, growth_length: float = 1., max_length: float = 7.,\
+               tie_axis: tuple = (0,1,1), order: int = 0, prototype_dict: dict = {}, name = None):
+       
+    super().__init__(copy_from, max_buds_segment,thickness, thickness_increment, growth_length,\
+               max_length, tie_axis,  order)
+    if copy_from:
+      self.__copy_constructor__(copy_from)
+    else:
+      self.prototype_dict = prototype_dict    
+    if not name:
+      self.name = str(self.__class__.__name__) +'_'+ str(self.__class__.count)      
+    Trunk.count+=1
+    
+  def is_bud_break(self, num_buds_segment):
+    if (rd.random() > 0.2*(1 - num_buds_segment/self.max_buds_segment)):
+      return False
+    return True
+    
+  def create_branch(self):
+    if rd.random() > 0.8:
+      return Spur(copy_from = self.prototype_dict['spur'])
+    else:
+      return Branch(copy_from = self.prototype_dict['branch'])
+  
+  def grow(self):
+    pass
+               
+
+
+      
+#Pass transition probabs? --> solve with abstract classes
+basicwood_prototypes['spur'] = Spur(tie_axis = (1,1,0), max_length = 1, thickness_increment = 0.005, prototype_dict = basicwood_prototypes)
+basicwood_prototypes['branch'] = Branch(tie_axis = (1,1,0), max_length = 20, thickness_increment = 0.005, prototype_dict = basicwood_prototypes)
+basicwood_prototypes['trunk'] = Trunk(tie_axis = (1,1,0), max_length = 20, thickness_increment = 0.02, prototype_dict = basicwood_prototypes)
+#init  
+trunk_base = Trunk(copy_from = basicwood_prototypes['trunk'])
+time_count = 0
+
+
+module trunk
+module bud
+module branch
+Axiom: trunk(trunk_base)
+derivation length: 30
+
+production:
+#Decide whether branch internode vs trunk internode need to be the same size.
+trunk(o) :
+  # Trunk segment
+  if o.length >= o.max_length:
+    nproduce *
+  else:
+    o.grow_one()
+    produce I(o.growth_length, o.thickness, o)bud(ParameterSet(type = o, num_buds = 0))trunk(o)
+
+bud(t) :
+ if t.type.is_bud_break(t.num_buds):
+   new_object = t.type.create_branch()
+   #t.type.branch_dict.append(new_object) #Why is storing this taking up so much time? Assuming that it is because of the l-system processing part as timing append isnt takin much time
+   #Store new object somewhere
+   t.num_buds+=1
+   t.type.num_branches+=1
+   nproduce [/(rd.random()*360)&(rd.random()*90)branch(new_object)]bud(t)
+ 
+   
+   
+branch(o) :
+  if o == None:
+    produce *
+  if o.length >= o.max_length:
+    produce *
+  else:
+    o.grow_one()
+    produce I(o.growth_length, o.thickness, o)bud(ParameterSet(type = o, num_buds = 0))branch(o)
+    
+
+I(s,r,o) --> I(s,r+o.thickness_increment, o)
+_(r) --> _(r+o.thickness_increment)
+
+homomorphism:
+
+I(a,r,o) --> F(a,r)
+S(a,r,o) --> F(a,r)

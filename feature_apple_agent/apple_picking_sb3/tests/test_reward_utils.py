@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from pruning_sb3.pruning_gym.pyb_utils import pyb_utils
-from pruning_sb3.pruning_gym.reward_utils import Reward
+from apple_picking_sb3.pruning_gym.pyb_utils import pyb_utils
+from apple_picking_sb3.pruning_gym.reward_utils import Reward
 
 
 @pytest.fixture

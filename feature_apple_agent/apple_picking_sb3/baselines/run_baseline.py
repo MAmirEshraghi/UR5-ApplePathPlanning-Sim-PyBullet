@@ -3,17 +3,17 @@ import random
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from pruning_sb3.pruning_gym.pruning_env import PruningEnvRRT
+from apple_picking_sb3.pruning_gym.pruning_env import PruningEnvRRT
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.env_util import make_vec_env
-from pruning_sb3.args.args import \
+from apple_picking_sb3.args.args import \
     args
-from pruning_sb3.pruning_gym.helpers import set_args, organize_args, make_or_bins
+from apple_picking_sb3.pruning_gym.helpers import set_args, organize_args, make_or_bins
 import argparse
 import pickle
 import pandas as pd
 from stable_baselines3.common import utils
-from pruning_sb3.baselines.baselines_callbacks import PruningRRTSetGoalCallback, GenerateResults
+from apple_picking_sb3.baselines.baselines_callbacks import PruningRRTSetGoalCallback, GenerateResults
 parser = argparse.ArgumentParser()
 
 #TODO: Not tested. Required refactoring

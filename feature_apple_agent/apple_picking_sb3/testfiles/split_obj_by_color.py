@@ -3,7 +3,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 import pywavefront
 from collections import defaultdict
-from pruning_sb3.pruning_gym import label
+from apple_picking_sb3.pruning_gym import label
 
 def parse_labelled_tree(file_path):
     scene = pywavefront.Wavefront(file_path, collect_faces=True)
@@ -81,13 +81,13 @@ def save_as_obj(vertices, indices, output_folder, output_file, label, color):
 import glob
 import os
 
-input_folder = 'C://Users//abhin//PycharmProjects//sb3bleeding//pruning_sb3//meshes_and_urdf//meshes//trees//envy//train_labelled'
-output_folder = 'C://Users//abhin//PycharmProjects//sb3bleeding//pruning_sb3//meshes_and_urdf//meshes//trees//envy//train_labelled_split_colored'
+input_folder = 'C://Users//abhin//PycharmProjects//sb3bleeding//apple_picking_sb3//meshes_and_urdf//meshes//trees//envy//train_labelled'
+output_folder = 'C://Users//abhin//PycharmProjects//sb3bleeding//apple_picking_sb3//meshes_and_urdf//meshes//trees//envy//train_labelled_split_colored'
 #If output folder does not exist, create it
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 print(glob.glob(os.path.join(input_folder, '*.obj')))
-# output_folder = '/Users/abhinav/Desktop/gradstuff/research/pruning_sb3/meshes_and_urdf/meshes/trees/envy/train_labelled'
+# output_folder = '/Users/abhinav/Desktop/gradstuff/research/apple_picking_sb3/meshes_and_urdf/meshes/trees/envy/train_labelled'
 for input_file in glob.glob(os.path.join(input_folder, '*.obj')):
     #get just the file name
     output_file = os.path.basename(input_file).split('.')[0]

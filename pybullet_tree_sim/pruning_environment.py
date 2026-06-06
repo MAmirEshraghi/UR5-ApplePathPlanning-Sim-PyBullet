@@ -167,7 +167,7 @@ class PruningEnv(gym.Env):
         if tree:
             if self.verbose:
                 log.info("Activating tree")
-            tree.pyb_id = self.pbutils.pbclient.loadURDF(tree.urdf_path, useFixedBase=True)
+            tree.load_pybullet_body(self.pbutils.pbclient)
             log.info(f"Tree {tree.id_str} activated with PyBID {tree.pyb_id}")
 
             if include_support_posts:

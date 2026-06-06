@@ -4,7 +4,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 import torch as th
 import numpy as np
-from pruning_sb3.pruning_gym.running_mean_std import RunningMeanStd
+from apple_picking_sb3.pruning_gym.running_mean_std import RunningMeanStd
 import pytest
 
 

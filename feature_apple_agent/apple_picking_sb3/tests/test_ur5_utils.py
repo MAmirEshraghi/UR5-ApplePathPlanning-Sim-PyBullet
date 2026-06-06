@@ -3,9 +3,9 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 import pytest
-from pruning_sb3.pruning_gym.ur5_utils import UR5
-from pruning_sb3.pruning_gym import ROBOT_URDF_PATH, MESHES_AND_URDF_PATH
-from pruning_sb3.pruning_gym.pyb_utils import pyb_utils
+from apple_picking_sb3.pruning_gym.ur5_utils import UR5
+from apple_picking_sb3.pruning_gym import ROBOT_URDF_PATH, MESHES_AND_URDF_PATH
+from apple_picking_sb3.pruning_gym.pyb_utils import pyb_utils
 
 import numpy as np
 

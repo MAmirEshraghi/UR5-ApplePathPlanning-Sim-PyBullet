@@ -26,21 +26,43 @@ maintainers = [
 description = "A PyBullet package for simulating trees with the UR5 arm."
 requires-python = ">=3.9"
 dependencies = [
+    "filelock",
     "gymnasium",
+    "h5py",
     "modern_robotics",
     "numpy==1.26.4",
     "nptyping",
     "opencv-python",
     "pandas",
     "plotly",
+    "pybullet-planning",
     "pybullet==3.2.6",
     "pywavefront",
     "pyyaml",
-    'requests',
+    "requests",
     "scikit-image",
-    'tqdm',
+    "scipy",
+    "tqdm",
     "xacro",
     "zenlog",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "toolz",
+]
+rl = [
+    "imageio",
+    "matplotlib",
+    "pillow",
+    "psutil",
+    "sb3-contrib",
+    "seaborn",
+    "stable-baselines3",
+    "torch",
+    "torchvision",
+    "wandb",
 ]
 
 [project.scripts]

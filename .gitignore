@@ -171,3 +171,13 @@ cython_debug/
 pkl/
 
 meshes*/
+
+# # Large generated outputs
+# output/agent_data/*.hdf5
+# logs/apple_picking_imit_run_final/*.zip
+
+# Generated outputs and experiment logs (never commit)
+logs/
+output/
+
+

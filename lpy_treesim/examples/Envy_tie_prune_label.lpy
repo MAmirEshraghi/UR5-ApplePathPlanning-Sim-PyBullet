@@ -1,0 +1,385 @@
+"""
+Tying, Pruning, and Labelling Envy architecture tree
+"""
+import sys
+sys.path.append('../')
+from stochastic_tree import Support, BasicWood
+import numpy as np
+import random as rd
+import copy
+import gc
+import time
+import math
+from math import sin, cos, pi
+from helper import *
+
+
+
+class Spur(BasicWood):
+  count = 0
+  def __init__(self, copy_from = None, max_buds_segment: int = 5, thickness: float = 0.1,\
+               thickness_increment: float = 0.01, growth_length: float = 1., max_length: float = 7.,\
+               tie_axis: tuple = (0,1,1), order: int = 1, prototype_dict: dict = {}, name = None, color = None,\
+               max_leaves: int = 5):
+    super().__init__(copy_from, max_buds_segment,thickness, thickness_increment, growth_length,\
+               max_length, tie_axis,  order, color)
+    if copy_from:
+      self.__copy_constructor__(copy_from)     
+    else:
+      self.prototype_dict = prototype_dict    
+    if not name:
+      self.name = str(self.__class__.__name__) +'_'+ str(self.__class__.count)   
+    Spur.count+=1
+    
+    # Maximum number of things to grow off of a bud
+    self.max_leaves = max_leaves
+    
+    # Keep count of number of leaves to not go over max_leaves
+    self.num_leaves = 0
+    
+    # Every branch gets its own contour when it is constructed to ensure
+    # branches each having a unique profile curve 
+    self.contour = create_noisy_circle_curve(radius = 2, noise_factor = .2, num_points = 30)
+    
+  def is_bud_break(self, num_buds_segment):
+      return (rd.random() < 0.1)
+  
+  # Generates a leaf or apples
+  def create_branch(self):
+    return None
+  
+  def grow(self):
+    pass
+    
+class Branch(BasicWood):
+  count = 0
+  def __init__(self, copy_from = None,  max_buds_segment: int = 20, thickness: float = 0.1,\
+               thickness_increment: float = 0.01, growth_length: float = 1., max_length: float = 7.,\
+               tie_axis: tuple = (0,1,1), order: int = 1, prototype_dict: dict = {}, name = None, color = None):
+    
+    super().__init__(copy_from, max_buds_segment,thickness, thickness_increment, growth_length,\
+               max_length, tie_axis, order, color)
+    if copy_from:
+      self.__copy_constructor__(copy_from)
+    else:
+      self.prototype_dict = prototype_dict        
+        
+    if not name:
+      self.name = str(self.__class__.__name__) +'_'+ str(self.__class__.count)      
+    Branch.count+=1
+    self.num_buds_segment=0
+    
+    # Every branch gets its own contour when it is constructed to ensure
+    # branches each having a unique profile curve
+    self.contour = create_noisy_circle_curve(1, .5, 30)
+               
+  def is_bud_break(self, num_buds_segment):
+      return (rd.random() < 0.01*(1 - self.num_buds_segment/self.max_buds_segment))
+    
+  def create_branch(self):
+      self.num_buds_segment += 1
+      if rd.random()>0.4:
+        new_ob = NonTrunk(copy_from = self.prototype_dict['nontrunk'])
+      else:
+        new_ob = Spur(copy_from = self.prototype_dict['spur'])
+      return new_ob
+  
+  def grow(self):
+    pass  
+    
+class Trunk(BasicWood):
+  count = 0
+  """ Details of the trunk while growing a tree, length, thickness, where to attach them etc """
+  def __init__(self, copy_from = None, max_buds_segment: int = 5, thickness: float = 0.1,\
+               thickness_increment: float = 0.01, growth_length: float = 1., max_length: float = 7.,\
+               tie_axis: tuple = (0,1,1), order: int = 0, prototype_dict: dict = {}, name = None, color = None):
+       
+    super().__init__(copy_from, max_buds_segment,thickness, thickness_increment, growth_length,\
+               max_length, tie_axis,  order, color)
+    if copy_from:
+      self.__copy_constructor__(copy_from)
+    else:
+      self.prototype_dict = prototype_dict    
+    if not name:
+      self.name = str(self.__class__.__name__) +'_'+ str(self.__class__.count)      
+    Trunk.count+=1
+    
+    # Every branch gets its own contour when it is constructed to ensure
+    # branches each having a unique profile curve
+    self.contour = create_noisy_circle_curve(3, 0.2, 30)
+    
+  def is_bud_break(self, num_buds_segment):
+    if (rd.random() > 0.2*(1 - num_buds_segment/self.max_buds_segment)):
+      return False
+    return True
+    
+  def create_branch(self):
+    if rd.random() > 0.8:
+      return Spur(copy_from = self.prototype_dict['spur'])
+    else:
+      return Branch(copy_from = self.prototype_dict['branch'])
+  
+  def grow(self):
+    pass
+               
+class NonTrunk(BasicWood):
+  count = 0
+  def __init__(self, copy_from = None,  max_buds_segment: int = 5, thickness: float = 0.1,\
+               thickness_increment: float = 0.01, growth_length: float = 1., max_length: float = 7.,\
+               tie_axis: tuple = (0,1,1), order: int = 1, prototype_dict: dict = {}, name = None, color = None):
+    
+    super().__init__(copy_from, max_buds_segment,thickness, thickness_increment, growth_length,\
+               max_length, tie_axis, order, color)
+    if copy_from:
+      self.__copy_constructor__(copy_from)
+    else:
+      self.prototype_dict = prototype_dict        
+        
+    if not name:
+      self.name = str(self.__class__.__name__) +'_'+ str(self.__class__.count)      
+    Branch.count+=1
+    
+    # Every branch gets its own contour when it is constructed to ensure
+    # branches each having a unique profile curve
+    self.contour = create_noisy_circle_curve(1, .2, 30)
+               
+  def is_bud_break(self, num_buds_segment):
+      return (rd.random() < 0.02*(1 - num_buds_segment/self.max_buds_segment))
+    
+  def create_branch(self):
+      if rd.random()>0.3:
+        return None
+        #new_ob = Spur(copy_from = self.prototype_dict['nontrunkbranch'])
+      else:
+        new_ob = Spur(copy_from = self.prototype_dict['spur'])
+      return new_ob
+  
+  def grow(self):
+    pass  
+      
+#Pass transition probabs? --> solve with abstract classes
+growth_length = 0.1
+#everything is relative to growth length
+basicwood_prototypes = {}
+basicwood_prototypes['trunk'] = Trunk(tie_axis = (0,1,1), max_length = 0.4/growth_length, thickness = 0.01, growth_length = 0.1,thickness_increment = 0.00001, prototype_dict = basicwood_prototypes, color = [80,80,80] )
+basicwood_prototypes['branch'] = Branch(tie_axis = (0,1,1), max_length = .22/growth_length, thickness = 0.01, growth_length = 0.1,thickness_increment = 0.00001, prototype_dict = basicwood_prototypes, color = [65,45,15] )
+basicwood_prototypes['nontrunk'] = NonTrunk(tie_axis = (0,1,1), max_length = 0.05/growth_length, growth_length = 0.1, thickness = 0.003,thickness_increment = 0.0001, prototype_dict = basicwood_prototypes, color = [60,0,0] )
+basicwood_prototypes['spur'] = Spur(tie_axis = (0,1,1), max_length = 0.02/growth_length, thickness = 0.003, growth_length = 0.1, thickness_increment = 0., prototype_dict = basicwood_prototypes, color = [30,60,10] )
+
+
+#init  
+trunk_base = Trunk(copy_from = basicwood_prototypes['trunk'])
+time_count = 0
+def generate_points_v_trellis():
+  x = np.full((7,), 0.45).astype(float)
+  #z = np.arange(3, 24, 3).astype(float)
+  y = np.full((7,), 0).astype(float)
+  z = np.arange(0.6,3.4, 0.45)
+
+  pts = []
+  id = 0
+  for i in range(x.shape[0]):
+    pts.append((-x[i], y[i], z[i]))
+    id+=1
+    pts.append((x[i], y[i], z[i]))
+    id+=1
+  return pts
+#                  points,                   num_wires  spacing wires trunk_wire_pt    branch_axis    trunk_axis
+support = Support(generate_points_v_trellis(), 14 ,      1 ,            None,          (0,0,1),       None)
+num_iteration_tie = 20
+###Tying stuff begins
+    
+def ed(a,b):
+  return (a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2
+  
+def get_energy_mat(branches, arch):
+  num_branches = len(branches)
+  num_wires = len(list(arch.branch_supports.values()))
+  energy_matrix = np.ones((num_branches,num_wires))*np.inf
+  for branch_id, branch in enumerate(branches):
+    if branch.has_tied:
+      continue
+    for wire_id, wire in arch.branch_supports.items():
+      if wire.num_branch>=1:
+        continue
+      energy_matrix[branch_id][wire_id] = ed(wire.point,branch.end)/2+ed(wire.point,branch.start)/2#+v.num_branches*10+branch.bend_energy(deflection, curr_branch.age)
+
+  return energy_matrix
+  
+def decide_guide(energy_matrix, branches, arch):
+  for i in range(energy_matrix.shape[0]):
+    min_arg = np.argwhere(energy_matrix == np.min(energy_matrix))
+    if(energy_matrix[min_arg[0][0]][min_arg[0][1]] == np.inf) or energy_matrix[min_arg[0][0]][min_arg[0][1]] > 1:
+      return
+    if not (branches[min_arg[0][0]].has_tied == True):# and not (arch.branch_supports[min_arg[0][1]].num_branch >=1):
+      branches[min_arg[0][0]].guide_target = arch.branch_supports[min_arg[0][1]]#copy.deepcopy(arch.branch_supports[min_arg[0][1]].point)
+      #trellis_wires.trellis_pts[min_arg[0][1]].num_branches+=1
+      for j in range(energy_matrix.shape[1]):
+        energy_matrix[min_arg[0][0]][j] = np.inf
+      for j in range(energy_matrix.shape[0]):
+        energy_matrix[j][min_arg[0][1]] = np.inf
+        
+def tie(lstring):
+  for j,i in enumerate(lstring):
+    if i == 'C' and i[0].type.__class__.__name__ == 'Branch':
+      if i[0].type.tie_updated == False:
+        continue
+      curr = i[0]
+      if i[0].type.guide_points:
+        i[0].type.tie_updated = False
+        i[0].type.guide_target.add_branch()
+        lstring, count = i[0].type.tie_lstring(lstring, j)
+       
+        return True
+  return False
+        
+#Pruning strategy
+def pruning_strategy(lstring): #Remove remnants of cut
+  cut = False
+  for j,i in enumerate(lstring):
+    if i.name == 'C' and i[0].type.age > 6 and i[0].type.has_tied == False and i[0].type.cut == False:
+      
+      i[0].type.cut = True      
+      lstring = cut_using_string_manipulation(j, lstring)
+      return True
+  return False
+  
+def StartEach(lstring):
+  global parent_child_dict
+  for i in parent_child_dict[trunk_base.name]:
+      if i.tie_updated == False:
+        i.tie_update()
+    
+  
+def EndEach(lstring):
+  global parent_child_dict, support
+  tied = False  
+  if (getIterationNb()+1)%num_iteration_tie == 0:
+    energy_matrix = get_energy_mat(parent_child_dict[trunk_base.name], support)
+    decide_guide(energy_matrix, parent_child_dict[trunk_base.name], support)
+    for branch in parent_child_dict[trunk_base.name]:
+      branch.update_guide(branch.guide_target)
+    while tie(lstring):
+      pass
+    while pruning_strategy(lstring):
+      pass
+  return lstring
+  
+parent_child_dict = {}
+parent_child_dict[trunk_base.name] = [] 
+module Attractors
+module grow_object
+module bud
+module branch
+module C
+extern(label = True)
+extern(seed_val = 0)
+rd.seed(seed_val)
+
+
+# When called, produce two curves to guide the production of an apple,
+# returns the two curves together in an array     
+
+# Used to set the contour back to a circle after it has been changed for a branch 
+def reset_contour():
+  default_curve = create_noisy_circle_curve(1, 0, 30)  # Example of a simple default contour
+  nproduce SetContour(default_curve)
+
+
+curve = create_bezier_curve(x_range = (-1, 1), y_range = (-1, 1), z_range = (0, 10), seed_val=time.time())
+Axiom: Attractors(support)SetGuide(curve, trunk_base.max_length)[grow_object(trunk_base)]
+derivation length: 105
+production:
+#Decide whether branch internode vs trunk internode need to be the same size.
+grow_object(o) :
+  if o == None:
+    produce *
+  else:
+    if o.length >= o.max_length:
+      o.age += 1
+      nproduce *
+    else:
+      # Get object's usual color and apply it
+      r, g, b = o.color
+      nproduce SetColor(r, g, b)
+      
+      # This sets unique color IDs
+      # In order to have the tree semantically segmented,
+      # simply comment out the two following lines
+      smallest_color = [r, g, b].index(min([r, g, b]))
+      o.color[smallest_color] += 1
+      
+      # Check if it's a trunk or branch, then apply the contour
+      #if 'Trunk' in o.name or 'Branch' in o.name:
+       # nproduce SetContour(o.contour)
+     # else:
+        # set the contour back to a usual circle
+      #  reset_contour()
+      nproduce SetContour(o.contour)
+      o.grow_one()
+      
+      if 'Spur' in o.name:
+        # note that the production of the buds is here with 'spiked_bud(o.thickness)' 
+        produce I(o.growth_length, o.thickness, o) bud(ParameterSet(type=o, num_buds=0))grow_object(o) #spiked_bud(o.thickness)grow_object(o)
+      else:
+        # If o is a Trunk, Branch, or NonTrunk, simply produce the internodes 
+        produce I(o.growth_length, o.thickness, o) bud(ParameterSet(type=o, num_buds=0)) grow_object(o)
+
+
+bud(t) :
+   if t.type.is_bud_break(t.num_buds):
+     new_object = t.type.create_branch()
+     if new_object == None:
+       produce *
+
+     parent_child_dict[new_object.name] = []
+     parent_child_dict[t.type.name].append(new_object)
+     #Store new object somewhere
+     t.num_buds+=1
+     t.type.num_branches+=1
+
+     # Set a curve for tertiary branches to follow as they grow 
+     if 'NonTrunk' in new_object.name:
+         import time
+         curve = create_bezier_curve(x_range = (-.5,.5), y_range = (-.5,.5), z_range = (-1,1), seed_val=time.time())
+         nproduce [SetGuide(curve, new_object.max_length)
+     elif 'Spur' in new_object.name:
+         import time
+         curve = create_bezier_curve(x_range = (-.2,.2), y_range = (-.2,.2), z_range = (-1,1), seed_val=time.time())
+         nproduce [SetGuide(curve, new_object.max_length)
+     else:
+         nproduce [
+     nproduce @RGetPos(new_object.start)C(ParameterSet(type = new_object))/(rd.random()*360)&(rd.random()*360)grow_object(new_object)GetPos(new_object.end)]bud(t)
+
+
+# Simple set of productions to build apple bud. This bud is
+# made up of a cylinder and a cone
+spiked_bud(r):
+  base_height = r * 2
+  top_height = r * 2
+  num_sect = 20
+  produce @g(Cylinder(r,base_height,1,num_sect))f(base_height)@g(Cone(r,top_height,0,num_sect))
+
+
+# Production rules to make apples. The curves are generated, the base
+# of the apple is generated, then the turtle turns 180 degrees and
+# generates the top indentation of the apple. Stem is created in the S production section
+A(bh, r):
+  curves = make_apple_curve()
+  base_curve = curves[0]
+  top_curve = curves[1]
+  nproduce SetColor(230,0,0) SectionResolution(60)
+  produce nF(bh, .01, r, base_curve) ^(180) nF(bh/5, .1, r, top_curve)^(180)#S(bh/2,r/15)
+
+
+I(s,r,o) --> I(s,r+o.thickness_increment, o)
+#_(r) --> _(r+o.thickness_increment)
+_(r) --> _(r)
+homomorphism:
+I(a,r,o) --> F(a,r)
+S(a,r,o) --> F(a,r)
+production:   
+Attractors(support):
+  pttodisplay = support.attractor_grid.get_enabled_points()
+  if len(pttodisplay) > 0:
+    produce [,(3) @g(PointSet(pttodisplay,width=10))]

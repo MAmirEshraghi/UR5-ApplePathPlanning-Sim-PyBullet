@@ -4,7 +4,7 @@ from typing import List, Tuple
 import numpy as np
 import pybullet as pybullet
 from nptyping import NDArray
-from pruning_sb3.pruning_gym import MESHES_AND_URDF_PATH
+from apple_picking_sb3.pruning_gym import MESHES_AND_URDF_PATH
 from pybullet_utils import bullet_client as bc
 
 

@@ -4,7 +4,7 @@
 # ((0.13449475169181824, -0.5022648572921753, 0.5729056596755981)
 import sys
 
-sys.path.append("/pruning_sb3")
+sys.path.append("/apple_picking_sb3")
 from gym_env_discrete import PruningEnv
 from PPOAE.models import *
 import numpy as np

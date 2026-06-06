@@ -2,19 +2,19 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-from pruning_sb3.pruning_gym.pruning_env import PruningEnv
-from pruning_sb3.pruning_gym.models import *
+from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_picking_sb3.pruning_gym.models import *
 import numpy as np
 import random
 import argparse
-from pruning_sb3.args.args import args
-from pruning_sb3.pruning_gym.helpers import linear_schedule, exp_schedule, set_args, organize_args
-from pruning_sb3.pruning_gym.helpers import make_or_bins, get_policy_kwargs
-from pruning_sb3.pruning_gym.callbacks.train_callbacks import PruningTrainSetGoalCallback
-from pruning_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAE
-from pruning_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
+from apple_picking_sb3.args.args import args
+from apple_picking_sb3.pruning_gym.helpers import linear_schedule, exp_schedule, set_args, organize_args
+from apple_picking_sb3.pruning_gym.helpers import make_or_bins, get_policy_kwargs
+from apple_picking_sb3.pruning_gym.callbacks.train_callbacks import PruningTrainSetGoalCallback
+from apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAE
+from apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
 from stable_baselines3.common import utils
-from pruning_sb3.pruning_gym.tree import Tree
+from apple_picking_sb3.pruning_gym.tree import Tree
 import time
 import pickle
 import glob

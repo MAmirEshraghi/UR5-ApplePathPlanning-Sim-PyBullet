@@ -3,12 +3,12 @@ from typing import Callable, Union
 
 import torch as th
 from models import AutoEncoder
-from pruning_sb3.algo.SACAE.policies import SACPolicy
-from pruning_sb3.algo.SACAE.sac_ae import SAC
+from apple_picking_sb3.algo.SACAE.policies import SACPolicy
+from apple_picking_sb3.algo.SACAE.sac_ae import SAC
 # from args import args_dict
-from pruning_sb3.args.args_test import args_dict
-from pruning_sb3.pruning_gym.custom_callbacks import CustomEvalCallback, CustomTrainCallback
-from pruning_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_picking_sb3.args.args_test import args_dict
+from apple_picking_sb3.pruning_gym.custom_callbacks import CustomEvalCallback, CustomTrainCallback
+from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
 from stable_baselines3.common import utils
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor

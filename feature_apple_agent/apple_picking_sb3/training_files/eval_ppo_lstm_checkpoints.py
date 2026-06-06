@@ -2,11 +2,11 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-from pruning_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
-from pruning_sb3.pruning_gym.callbacks.eval_callbacks import CustomResultCallback
-from pruning_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAE
-from pruning_sb3.pruning_gym.pruning_env import PruningEnv
-from pruning_sb3.pruning_gym.tree import Tree
+from apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
+from apple_picking_sb3.pruning_gym.callbacks.eval_callbacks import CustomResultCallback
+from apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAE
+from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_picking_sb3.pruning_gym.tree import Tree
 # import subprocvecenv
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
@@ -15,8 +15,8 @@ from stable_baselines3.common.env_util import make_vec_env
 import torch as th
 import argparse
 # from args import args_dict
-from pruning_sb3.args.args import args
-from pruning_sb3.pruning_gym.helpers import set_args, organize_args, make_or_bins, get_policy_kwargs
+from apple_picking_sb3.args.args import args
+from apple_picking_sb3.pruning_gym.helpers import set_args, organize_args, make_or_bins, get_policy_kwargs
 import random
 if __name__ == "__main__":
     # Create the ArgumentParser object

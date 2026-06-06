@@ -2,7 +2,7 @@ import os
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 import pandas as pd
-from pruning_sb3.pruning_gym.callbacks.eval_callbacks import PruningEvalSetGoalCallback
+from apple_picking_sb3.pruning_gym.callbacks.eval_callbacks import PruningEvalSetGoalCallback
 class PruningRRTSetGoalCallback(PruningEvalSetGoalCallback):
     def __init__(self, or_bins, type, num_orientations, num_points_per_or, dataset, verbose=0):
         super(PruningRRTSetGoalCallback, self).__init__(or_bins=or_bins, type=type, dataset = dataset, num_orientations=num_orientations,

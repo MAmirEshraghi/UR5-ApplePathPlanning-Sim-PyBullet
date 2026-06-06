@@ -6,6 +6,7 @@
         tree_type
         namespace
         parent:=^|world
+        use_visual_material:=true
         *origin
         ">
 
@@ -15,15 +16,18 @@
         <link name="${namespace}_${tree_type}_${str(tree_id).zfill(5)}">
             <visual>
                 <geometry>
-                    <mesh filename="./meshes/trees/envy/unlabeled/obj/${namespace}_${tree_type}_${str(tree_id).zfill(5)}.obj" scale="${scale}"/>
+                    <mesh filename="../../../../meshes/trees/${tree_type}/unlabeled/obj/${namespace}_${tree_type}_${str(tree_id).zfill(5)}.obj" scale="${scale}"/>
                 </geometry>
-                <material name="LightGrey">
-                    <color rgba="0.7 0.7 0.7 1.0"/>
-                </material>
+                <!-- Omit material when false so PyBullet applies per-group map_Kd from OBJ/MTL (v2 export). -->
+                <xacro:if value="${ str(use_visual_material).lower() in ('true', '1', 'yes') }">
+                    <material name="LightGrey">
+                        <color rgba="0.7 0.7 0.7 1.0"/>
+                    </material>
+                </xacro:if>
             </visual>
             <collision concave="true">
                 <geometry>
-                    <mesh filename="./meshes/trees/envy/unlabeled/obj/${namespace}_${tree_type}_${str(tree_id).zfill(5)}.obj" scale="${scale}"/>
+                    <mesh filename="../../../../meshes/trees/${tree_type}/unlabeled/obj/${namespace}_${tree_type}_${str(tree_id).zfill(5)}.obj" scale="${scale}"/>
                 </geometry>
             </collision>
                 <inertial>

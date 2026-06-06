@@ -3,11 +3,11 @@ import argparse
 import torch as th
 from helpers import init_wandb, linear_schedule, exp_schedule, optical_flow_create_shared_vars
 from models import AutoEncoder
-from pruning_sb3.algo.SACAE.policies import SACPolicy
-from pruning_sb3.algo.SACAE.sac_ae import SAC
-from pruning_sb3.args.args import args_dict
-from pruning_sb3.pruning_gym.custom_callbacks import CustomEvalCallback, CustomTrainCallback
-from pruning_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_picking_sb3.algo.SACAE.policies import SACPolicy
+from apple_picking_sb3.algo.SACAE.sac_ae import SAC
+from apple_picking_sb3.args.args import args_dict
+from apple_picking_sb3.pruning_gym.custom_callbacks import CustomEvalCallback, CustomTrainCallback
+from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
 from stable_baselines3.common import utils
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv
@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
     if args.LOAD_PATH:
         load_path = "./logs/{}/best_model.zip".format(
-            args.LOAD_PATH)  # ./nfs/stak/users/jainab/hpc-share/codes/pruning_sb3/logs/lowlr/best_model.zip"#Nonei
+            args.LOAD_PATH)  # ./nfs/stak/users/jainab/hpc-share/codes/apple_picking_sb3/logs/lowlr/best_model.zip"#Nonei
     else:
         load_path = None
     train_env_kwargs = {"renders": args.RENDER, "tree_urdf_path": args.TREE_TRAIN_URDF_PATH,

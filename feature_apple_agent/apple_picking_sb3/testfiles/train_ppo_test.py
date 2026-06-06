@@ -1,13 +1,13 @@
 # PARSE ARGUMENTS
 import argparse
 
-from pruning_sb3.algo.PPOAE.policies import ActorCriticWithAePolicy
-from pruning_sb3.algo.PPOAE.ppo_ae import PPOAE
+from apple_picking_sb3.algo.PPOAE.policies import ActorCriticWithAePolicy
+from apple_picking_sb3.algo.PPOAE.ppo_ae import PPOAE
 # from args import args_dict
-from pruning_sb3.args.args_test import args_dict
-from pruning_sb3.pruning_gym.custom_callbacks import CustomEvalCallback, CustomTrainCallback
-from pruning_sb3.pruning_gym.models import *
-from pruning_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_picking_sb3.args.args_test import args_dict
+from apple_picking_sb3.pruning_gym.custom_callbacks import CustomEvalCallback, CustomTrainCallback
+from apple_picking_sb3.pruning_gym.models import *
+from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
 from stable_baselines3.common import utils
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.monitor import Monitor

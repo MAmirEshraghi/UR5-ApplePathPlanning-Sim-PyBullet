@@ -7,6 +7,7 @@
     <xacro:arg name="tree_id" default="0" />
     <xacro:arg name="tree_type" default="envy" />
     <xacro:arg name="parent" default="world" />
+    <xacro:arg name="use_visual_material" default="true" />
     <!-- <xacro:arg name="xyz" default="0.0 0.0 0.0"/>
     <xacro:arg name="rpy" default="0.0 0.0 0.0"/> -->
     
@@ -15,7 +16,8 @@
         namespace="$(arg namespace)"
         tree_id="$(arg tree_id)"
         tree_type="$(arg tree_type)"
-        parent="$(arg parent)" >
+        parent="$(arg parent)"
+        use_visual_material="$(arg use_visual_material)" >
         <origin rpy="0.0 0.0 0.0" xyz="0.0 0.0 0.0"/>
     </xacro:tree>
 

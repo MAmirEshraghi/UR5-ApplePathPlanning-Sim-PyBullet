@@ -1,0 +1,307 @@
+"""
+Tying, Pruning, and Labelling Envy architecture tree
+"""
+import sys
+sys.path.append('../')
+from stochastic_tree import Support, BasicWood
+import numpy as np
+import random as rd
+import copy
+import gc
+import time
+
+from helper import *
+
+class Spur(BasicWood):
+  count = 0
+  def __init__(self, copy_from = None, max_buds_segment: int = 5, thickness: float = 0.1,\
+               thickness_increment: float = 0.01, growth_length: float = 1., max_length: float = 7.,\
+               tie_axis: list = [0,1,1], order: int = 1, prototype_dict: dict = {}, name = None, color = None):
+    super().__init__(copy_from, max_buds_segment,thickness, thickness_increment, growth_length,\
+               max_length, tie_axis,  order, color)
+    if copy_from:
+      self.__copy_constructor__(copy_from)     
+    else:
+      self.prototype_dict = prototype_dict    
+    if not name:
+      self.name = str(self.__class__.__name__) +'_'+ str(self.__class__.count)   
+    Spur.count+=1
+    
+  def is_bud_break(self, num_buds_segment):
+      return (rd.random() < 0.1)
+    
+  def create_branch(self):
+      return None
+  
+  def grow(self):
+    pass
+    
+class Branch(BasicWood):
+  count = 0
+  def __init__(self, copy_from = None,  max_buds_segment: int = 5, thickness: float = 0.1,\
+               thickness_increment: float = 0.01, growth_length: float = 1., max_length: float = 7.,\
+               tie_axis: tuple = (0,1,1), order: int = 1, prototype_dict: dict = {}, name = None, color = None):
+    
+    super().__init__(copy_from, max_buds_segment,thickness, thickness_increment, growth_length,\
+               max_length, tie_axis, order, color)
+    if copy_from:
+      self.__copy_constructor__(copy_from)
+    else:
+      self.prototype_dict = prototype_dict        
+        
+    if not name:
+      self.name = str(self.__class__.__name__) +'_'+ str(self.__class__.count)      
+    Branch.count+=1
+               
+  def is_bud_break(self, num_buds_segment):
+      return (rd.random() < 0.02*(1 - num_buds_segment/self.max_buds_segment))
+    
+  def create_branch(self):
+      new_ob =  Spur(copy_from = self.prototype_dict['spur'])
+      return new_ob
+  
+  def grow(self):
+    pass  
+
+class NonTrunk(BasicWood):
+  count = 0
+  def __init__(self, copy_from = None,  max_buds_segment: int = 5, thickness: float = 0.1,\
+               thickness_increment: float = 0.01, growth_length: float = 1., max_length: float = 7.,\
+               tie_axis: tuple = (0,1,1), order: int = 1, prototype_dict: dict = {}, name = None, color = None):
+    
+    super().__init__(copy_from, max_buds_segment,thickness, thickness_increment, growth_length,\
+               max_length, tie_axis, order, color)
+    if copy_from:
+      self.__copy_constructor__(copy_from)
+    else:
+      self.prototype_dict = prototype_dict        
+        
+    if not name:
+      self.name = str(self.__class__.__name__) +'_'+ str(self.__class__.count)      
+    Branch.count+=1
+               
+  def is_bud_break(self, num_buds_segment):
+      return (rd.random() < 0.02*(1 - num_buds_segment/self.max_buds_segment))
+    
+  def create_branch(self):
+      new_ob =  Spur(copy_from = self.prototype_dict['spur'])
+      return new_ob
+  
+  def grow(self):
+    pass  
+    
+    
+class Trunk(BasicWood):
+  count = 0
+  """ Details of the trunk while growing a tree, length, thickness, where to attach them etc """
+  def __init__(self, copy_from = None, max_buds_segment: int = 5, thickness: float = 0.1,\
+               thickness_increment: float = 0.01, growth_length: float = 1., max_length: float = 7.,\
+               tie_axis: tuple = (0,1,1), order: int = 0, prototype_dict: dict = {}, name = None, color = None):
+       
+    super().__init__(copy_from, max_buds_segment,thickness, thickness_increment, growth_length,\
+               max_length, tie_axis,  order, color)
+    if copy_from:
+      self.__copy_constructor__(copy_from)
+    else:
+      self.prototype_dict = prototype_dict    
+    if not name:
+      self.name = str(self.__class__.__name__) +'_'+ str(self.__class__.count)      
+    Trunk.count+=1
+    
+  def is_bud_break(self, num_buds_segment):
+    if (rd.random() > 0.02*(1 - num_buds_segment/self.max_buds_segment)):
+      return False
+    return True
+    
+  def create_branch(self):
+    if rd.random() > 0.8:
+      return Spur(copy_from = self.prototype_dict['spur'])
+    else:
+      return Branch(copy_from = self.prototype_dict['branch'])
+  
+  def grow(self):
+    pass
+               
+
+
+      
+#Pass transition probabs? --> solve with abstract classes
+
+#basicwood_prototypes = {}
+#basicwood_prototypes['trunk'] = Trunk(tie_axis = [0,1,1], max_length = 20, thickness_increment = 0.02, prototype_dict = basicwood_prototypes, color = 0)
+#basicwood_prototypes['branch'] = Branch(tie_axis = [0,1,1], max_length = 20, thickness_increment = 0.005, prototype_dict = basicwood_prototypes, color = 1)
+#basicwood_prototypes['spur'] = Spur(tie_axis = [0,1,1], max_length = 1, thickness_increment = 0.005, prototype_dict = basicwood_prototypes, color = 2)
+
+growth_length = 0.1
+#everything is relative to growth length
+basicwood_prototypes = {}
+basicwood_prototypes['trunk'] = Trunk(tie_axis = (0,1,1), max_length = 2.5/growth_length, thickness = 0.01, growth_length = 0.1,thickness_increment = 0.0005, prototype_dict = basicwood_prototypes, color = 0)
+basicwood_prototypes['branch'] = Branch(tie_axis = (0,1,1), max_length = .45/growth_length, thickness = 0.01, growth_length = 0.1,thickness_increment = 0.00005, prototype_dict = basicwood_prototypes, color = 1)
+basicwood_prototypes['nontrunkbranch'] = NonTrunk(tie_axis = (0,0,1), max_length = 0.1/growth_length, growth_length = 0.1, thickness = 0.0001,thickness_increment = 0.0001, prototype_dict = basicwood_prototypes, color = 1)
+basicwood_prototypes['spur'] = Spur(tie_axis = (0,1,1), max_length = 0.01/growth_length, thickness = 0.005, growth_length = 0.01,thickness_increment = 0., prototype_dict = basicwood_prototypes, color = 2)
+
+#init  
+trunk_base = Trunk(copy_from = basicwood_prototypes['trunk'])
+time_count = 0
+label = True
+def generate_points_v_trellis():
+  x = np.full((7,), 1.45).astype(float)
+  #z = np.arange(3, 24, 3).astype(float)
+  y = np.full((7,), 0).astype(float)
+  z = np.arange(0.6,3.4, 0.45)
+  pts = []
+  id = 0
+  for i in range(x.shape[0]):
+    pts.append((-x[i], y[i], z[i]))
+    id+=1
+    pts.append((x[i], y[i], z[i]))
+    id+=1
+  return pts
+
+  
+
+support = Support(generate_points_v_trellis(), 14 , 1 , None, (0,0,1), None)
+num_iteration_tie = 30
+
+###Tying stuff begins
+    
+def ed(a,b):
+  return np.linalg.norm(a-b)
+  
+def get_energy_mat(branches, arch):
+  #branches = [i for i in branches if "Branch" in i.name]
+  num_branches = len(branches)
+  num_wires = len(list(arch.branch_supports.values()))
+  energy_matrix = np.ones((num_branches,num_wires))*np.inf
+  #print(energy_matrix.shape)
+  for branch_id, branch in enumerate(branches):
+    if branch.has_tied:
+      continue
+    for wire_id, wire in arch.branch_supports.items():
+      if wire.num_branch>=1:
+        continue
+      energy_matrix[branch_id][wire_id] = ed(wire.point,branch.end)/2+ed(wire.point,branch.start)/2#+v.num_branches*10+branch.bend_energy(deflection, curr_branch.age)
+  return energy_matrix
+
+def decide_guide(energy_matrix, branches, arch):
+  for i in range(energy_matrix.shape[0]):
+    min_arg = np.argwhere(energy_matrix == np.min(energy_matrix))
+    #print(min_arg)
+    if(energy_matrix[min_arg[0][0]][min_arg[0][1]] == np.inf):# or energy_matrix[min_arg[0][0]][min_arg[0][1]] > 1:
+      return
+    if not (branches[min_arg[0][0]].has_tied == True):# and not (arch.branch_supports[min_arg[0][1]].num_branch >=1):
+      #print("Imp:",min_arg[0][0], min_arg[0][1], energy_matrix[min_arg[0][0]][min_arg[0][1]])
+      branches[min_arg[0][0]].guide_target = arch.branch_supports[min_arg[0][1]]#copy.deepcopy(arch.branch_supports[min_arg[0][1]].point)
+      #trellis_wires.trellis_pts[min_arg[0][1]].num_branches+=1
+      for j in range(energy_matrix.shape[1]):
+        energy_matrix[min_arg[0][0]][j] = np.inf
+      for j in range(energy_matrix.shape[0]):
+        energy_matrix[j][min_arg[0][1]] = np.inf
+
+def tie(lstring):
+  for j,i in enumerate(lstring):
+    if i == 'C' and i[0].type.__class__.__name__ == 'Branch':
+      if i[0].type.tie_updated == False:
+        continue
+      curr = i[0]
+      if i[0].type.guide_points:
+        #print("tying ", i[0].type.name, i[0].type.guide_target.point)
+        i[0].type.tie_updated = False
+        i[0].type.guide_target.add_branch()
+        lstring, count = i[0].type.tie_lstring(lstring, j)
+       
+        return True
+  return False
+        
+#Pruning strategy
+
+def pruning_strategy(lstring): #Remove remnants of cut
+  cut = False
+ 
+  for j,i in enumerate(lstring):
+    
+    if i.name == 'C' and i[0].type.age > 10 and i[0].type.has_tied == False and i[0].type.cut == False:
+     
+      i[0].type.cut = True      
+      #print("Cutting", i[0].type.name) 
+      lstring = cut_from(j, lstring)
+      
+      return True
+      
+  return False
+  
+def StartEach(lstring):
+  global parent_child_dict
+  for i in parent_child_dict[trunk_base.name]:
+	  if i.tie_updated == False:
+	    i.tie_update()
+    
+  
+def EndEach(lstring):
+  global parent_child_dict, support
+  tied = False  
+  
+  if (getIterationNb()+1)%num_iteration_tie == 0:
+    energy_matrix = get_energy_mat(parent_child_dict[trunk_base.name], support)
+    print(energy_matrix)
+    decide_guide(energy_matrix, parent_child_dict[trunk_base.name], support)
+    for branch in parent_child_dict[trunk_base.name]:
+      branch.update_guide(branch.guide_target)
+      print(branch.name, branch.guide_target)
+    while tie(lstring):
+      pass
+    while pruning_strategy(lstring):
+      pass
+  return lstring
+  
+parent_child_dict = {}
+parent_child_dict[trunk_base.name] = []	
+#print(generate_points_ufo())
+module Attractors
+module grow_object
+module bud
+module branch
+module C
+Axiom: Attractors(support)grow_object(trunk_base)
+derivation length: 100
+
+production:
+#Decide whether branch internode vs trunk internode need to be the same size.
+grow_object(o) :
+  if o == None:
+    produce *
+  if o.length >= o.max_length:
+    o.age+=1
+    nproduce *
+  else:
+    if label:
+      nproduce SetColor(o.color)
+    o.grow_one()
+    produce I(o.growth_length, o.thickness, o)bud(ParameterSet(type = o, num_buds = 0))grow_object(o)
+
+bud(t) :
+ if t.type.is_bud_break(t.num_buds):
+   new_object = t.type.create_branch()
+   if new_object == None:
+     produce *
+   parent_child_dict[new_object.name] = []	
+   parent_child_dict[t.type.name].append(new_object)
+   #Store new object somewhere
+   t.num_buds+=1
+   t.type.num_branches+=1
+   nproduce [@RGetPos(new_object.start)C(ParameterSet(type = new_object))/(rd.random()*360)&(rd.random()*90)grow_object(new_object)GetPos(new_object.end)]bud(t)
+ 
+   
+I(s,r,o) --> I(s,r+o.thickness_increment, o)
+_(r) --> _(r+o.thickness_increment)
+
+homomorphism:
+
+I(a,r,o) --> F(a,r)
+S(a,r,o) --> F(a,r)
+
+production:   
+Attractors(support):
+  pttodisplay = support.attractor_grid.get_enabled_points()
+  if len(pttodisplay) > 0:
+    produce [,(3) @g(PointSet(pttodisplay,width=10))]

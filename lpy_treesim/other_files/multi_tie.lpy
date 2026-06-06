@@ -1,0 +1,151 @@
+from openalea.plantgl.all import *
+from openalea.plantgl.scenegraph.cspline import CSpline
+from random import uniform, seed
+from math import pi
+import numpy as np
+
+def __initialiseContext__(context):
+	#print(context)
+	context.animation_timestep = 0.001
+	scalars = [('radius', 'Integer', 14, 1, 100), ('freq', 'Integer', 100, 3, 100), ('unitstep', 'Integer', 5, 1, 1000), ('with_ticks', 'Bool', True), ('show_pos', 'Integer', 347, 0, 1000), ('with_frames', 'Bool', True), ('with_branches', 'Bool', False), ('branch_step', 'Integer', 1, 1, 1000)]
+	context["__scalars__"] = scalars
+	for s in scalars:
+		if not s[1] == "Category" : context[s[0]] = s[2]
+	import openalea.plantgl.all as pgl
+	amplitude = pgl.NurbsCurve2D(	
+	    ctrlPointList = pgl.Point3Array([(0, 0.00398406, 1),(0.135147, 1.09012, 1),(0.255548, 1.10149, 1),(0.462358, -0.133011, 1),(0.575864, 0.0540148, 1),(0.666072, 0.994762, 1),(0.857973, 1.00619, 1),(1, 0, 1)]) , 
+	    )
+	amplitude.name = "amplitude"
+	panel_0 = ({'name': 'Panel 1', 'active': True, 'visible': False},[('Function',amplitude)])
+	parameterset = [panel_0,]
+	context["__functions__"] = [('amplitude',amplitude),]
+	context["__curves__"] = []
+	context["__parameterset__"] = parameterset
+	context["amplitude"] = pgl.QuantisedFunction(amplitude)
+	
+
+__initialiseContext__(context())
+
+
+seed(6)
+
+target = Vector3(9,0,-2)
+current = Vector3(3,0,4)
+start = Vector3(0,0,0)
+def deflection(d, x, L):
+  return (d/2)*(x**2)/(L**3)*(3*L - x)
+  #return d*(1 - np.cos(np.pi*x/(2*L))) #Axial loading
+
+class branch():
+  def __init__(self):
+    pass
+  def decompose(self):
+    pass
+    
+def amplitude(x): return 1
+
+def get_ctrl(target, start, current):
+    Lcurve = np.sqrt((start[0]-current[0])**2 + (current[1]-start[1])**2 + (current[2]-start[2])**2)
+    pts = []
+    curve_end_x = np.sqrt(Lcurve**2 - (target[1]-start[1])**2 - (target[2]-start[2])**2)
+    i_target = [curve_end_x, target[1], target[2]]
+    print("rarf", i_target)
+    dxyz = np.array(i_target) - np.array(current)
+    dx = np.array(current) - np.array(start)
+    for i in range(1,1001):
+       x = i/1000
+       d = deflection(dxyz, x*Lcurve, Lcurve)
+       pts.append(tuple((x*dx[0]+d[0], x*dx[1]+d[1], x*dx[2]+d[2])))
+    dxyz = np.array(target) - np.array(i_target) 
+    #for i in range(1,101):
+       #x = i/100
+       #pts.append(tuple([i_target[0] - start[0]+x*dxyz[0], i_target[1]- start[1]+x*dxyz[1], i_target[2]- start[2]+x*dxyz[2]]))
+    spline = CSpline(pts)
+    return spline.curve()
+    
+def get_linear(target, current, L):
+    pts = []
+    dxyz = np.array(target) - np.array(current)
+    #print(dxyz)
+    for i in range(1,101):
+       x = i/100
+       pts.append(tuple((x*dxyz[0], x*dxyz[1], x*dxyz[2])))#tuple(deflection(dxyz, x, L)))
+    
+    spline = CSpline(pts)
+    #print(pts)
+    return spline.curve()
+    
+def myrandom(radius): 
+    return uniform(-radius,radius)
+
+def gen_noise_branch(radius,curvelength,lmax, nbp=10):
+    global target, current, start
+    return  get_ctrl(target, start, current)#NurbsCurve([(0,0,0,1),] +get_ctrl(target),
+             #           degree=min(nbp-1,3),stride=nbp*100)
+curve_len = 5
+length = 9
+dis = 0.05
+print (dis)
+nbstep = 1 if isAnimationEnabled() else 100
+dt = 1/float(nbstep+1)
+
+module Normal
+
+path = gen_noise_branch(radius/100.,curve_len,length, 1000)
+path_linear = get_linear(current, start, length)
+l = path.getLength()
+
+
+Axiom: [,(3) @M(target) @O(0.2)] [,(2) @M(current) @O(0.2)][,(2) @M(start) @O(0.2)] @M(start) _(0.01)  Frame(0.1) Normal(0) @g(Scaled(length/l,Translated(Vector3(-path.ctrlPointList[0].x,0,0),path)))[SetGuide(path,length)A(length/dis)][SetGuide(path_linear,length)A(length/dis)]
+
+derivation length: nbstep
+production:
+
+Normal(t) --> Normal(t+dt)
+
+A(x):
+    nproduce Normal
+    if with_branches:
+         bstep = int(x * branch_step / 1000.)
+         if bstep < 1: bstep = 1
+         print (bstep)
+    for i in range(int(x)+0):
+        nproduce F(dis) #iRollR(10)
+        if with_branches and ((i % bstep) == 0):
+            nproduce [+(90) F(dis)]
+        if with_frames: 
+            nproduce Frame(0.1)
+        
+
+B(freq,length):
+  if with_ticks:
+    ul = length/freq
+    nproduce @O(ul/5)
+    for i in range(int(freq)):
+        nproduce F(ul)@O(ul/5)
+C(x):
+  for i in range(int(x)+0):
+        nproduce @Tp(current-target)F(dis) #iRollR(10)
+interpretation:
+
+Normal(t) :
+    if not isAnimationEnabled():
+        t = show_pos/1000.
+    u = path.getArcLengthToUMapping()(t)
+    p = path.getPointAt(u)
+    p *= length/l
+    t = path.getTangentAt(u)
+    t.normalize()
+    u = path.getNormalAt(u)
+    u.normalize()
+    produce [ ,(3)MoveTo(p.x,p.z,-p.y) SetHead(t.x,t.z,-t.y,u.x,u.z,-u.y) Frame(0.15) @O(0.05) ]
+
+endlsystem
+
+
+###### INITIALISATION ######
+
+__lpy_code_version__ = 1.1
+
+def __initialiseContext__(context):
+	context.animation_timestep = 0.001

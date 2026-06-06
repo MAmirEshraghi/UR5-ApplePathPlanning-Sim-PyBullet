@@ -1,0 +1,79 @@
+"""
+This file is a demonstration/testing BasicWood class
+"""
+import sys
+sys.path.append('../')
+from stochastic_tree import BasicWood
+import random as rd
+
+
+class Trunk(BasicWood):
+  count = 0
+  """ Details of the trunk while growing a tree, length, thickness, where to attach them etc """
+  def __init__(self, copy_from = None, max_buds_segment: int = 5, thickness: float = 0.1,\
+               thickness_increment: float = 0.01, growth_length: float = 1., max_length: float = 7.,\
+               tie_axis: tuple = (0,1,1), order: int = 0, prototype_dict: dict = {}, name = None, color = None):
+       
+    super().__init__(copy_from, max_buds_segment,thickness, thickness_increment, growth_length,\
+               max_length, tie_axis,  order, color)
+    if copy_from:
+      self.__copy_constructor__(copy_from)
+    else:
+      self.prototype_dict = prototype_dict    
+    if not name:
+      self.name = str(self.__class__.__name__) +'_'+ str(self.__class__.count)      
+    Trunk.count+=1
+    
+  def is_bud_break(self, num_buds_segment):
+    if (rd.random() > (1 - num_buds_segment/self.max_buds_segment)):
+      return False
+    return True
+    
+  def create_branch(self):
+      pass
+  
+  def grow(self):
+    pass
+               
+
+wood = Trunk()
+
+def EndEach(lstring):
+  if getIterationNb() == 9:
+    assert wood.age == 10
+    assert wood.length == 7
+    print("Test passed")
+  
+module A # represent trunk apical meristem
+
+
+Axiom: A(wood)
+
+derivation length: 10
+
+production:
+A(t) :
+  # Trunk segment
+  wood.grow_one()
+  nproduce I(wood.growth_length, wood.thickness)B(ParameterSet(num_buds = 0))A(t)
+  
+B(t) :
+  #Transition of buds
+  if wood.is_bud_break(t.num_buds):
+   t.num_buds+=1
+   nproduce [&(rd.random()*360)I(0.5,0.1)]B(t)
+
+I(s,r) --> I(s,r+wood.thickness_increment)
+_(r) --> _(r+wood.thickness_increment)
+
+homomorphism:
+
+I(a,r) --> F(a,r)
+S(a,r) --> F(a,r)
+ 
+###### INITIALISATION ######
+
+__lpy_code_version__ = 1.1
+
+def __initialiseContext__(context):
+	context.animation_timestep = 0.25

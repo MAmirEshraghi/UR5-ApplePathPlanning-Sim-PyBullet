@@ -3,7 +3,7 @@ import random
 
 import numpy as np
 import torch as th
-from pruning_sb3.pruning_gym.callbacks.callbacks import PruningSetGoalCallback
+from apple_picking_sb3.pruning_gym.callbacks.callbacks import PruningSetGoalCallback
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.logger import Video
 

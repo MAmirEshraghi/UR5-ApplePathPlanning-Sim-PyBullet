@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 # from memory_profiler import profile
 from typing import Optional, Tuple
 import random
-from pruning_sb3.pruning_gym import label
+from apple_picking_sb3.pruning_gym import label
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
@@ -18,7 +18,7 @@ from .ur5_utils import UR5
 from .pyb_utils import pyb_utils
 from .reward_utils import Reward
 from skimage.draw import disk
-from pruning_sb3.pruning_gym import ROBOT_URDF_PATH, SUPPORT_AND_POST_PATH
+from apple_picking_sb3.pruning_gym import ROBOT_URDF_PATH, SUPPORT_AND_POST_PATH
 import copy
 from scipy.spatial.transform import Rotation as R
 from collections import defaultdict
@@ -27,7 +27,7 @@ from pybullet_planning.interfaces.planner_interface.joint_motion_planning import
     get_distance_fn, get_difference_fn
 from pybullet_planning.interfaces.robots import get_collision_fn
 from pybullet_planning.motion_planners.smoothing import smooth_path, refine_waypoints
-from pruning_sb3.baselines.rrt_star_with_tolerance import informed_rrt_star_multi_goal, rrt_star_multi_goal
+from apple_picking_sb3.baselines.rrt_star_with_tolerance import informed_rrt_star_multi_goal, rrt_star_multi_goal
 import time
 import pandas as pd
 from enum import Enum

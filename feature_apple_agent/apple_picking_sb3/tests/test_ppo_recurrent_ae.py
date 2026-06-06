@@ -5,15 +5,15 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.
 
 import pytest
 from unittest.mock import Mock, patch
-from pruning_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAEWithExpert
-from pruning_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
-from pruning_sb3.pruning_gym.pruning_env import PruningEnv
-from pruning_sb3.pruning_gym import MESHES_AND_URDF_PATH
-from pruning_sb3.pruning_gym.models import AutoEncoder
+from apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAEWithExpert
+from apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
+from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_picking_sb3.pruning_gym import MESHES_AND_URDF_PATH
+from apple_picking_sb3.pruning_gym.models import AutoEncoder
 from gymnasium import spaces
 import numpy as np
 import torch as th
-from pruning_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
+from apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
 from sb3_contrib.common.recurrent.type_aliases import RNNStates
 import torch as th
 # self.observation_space = spaces.Dict({
@@ -95,7 +95,7 @@ def policy_kwargs():
 @pytest.fixture
 def algo(env, policy_kwargs):
     policy = RecurrentActorCriticPolicy
-    rl_algo = RecurrentPPOAEWithExpert(path_trajectories='C:\\Users\\abhin\\PycharmProjects\\sb3bleeding\\pruning_sb3\\expert_trajectories_test', use_online_data=True, use_offline_data=True,
+    rl_algo = RecurrentPPOAEWithExpert(path_trajectories='C:\\Users\\abhin\\PycharmProjects\\sb3bleeding\\apple_picking_sb3\\expert_trajectories_test', use_online_data=True, use_offline_data=True,
                                     use_ppo_offline=True, use_online_bc=True, use_awac=True, algo_size=(240,424),
                                     env = env, policy = policy, learning_rate=0.01, learning_rate_ae=0.01,
                                     learning_rate_logstd=0.01, n_steps=100, batch_size=10, n_epochs=100, ae_coeff=0.01,
@@ -117,7 +117,7 @@ def algo(env, policy_kwargs):
 
 def test_algo_instance(env, policy_kwargs):
     policy = RecurrentActorCriticPolicy
-    assert RecurrentPPOAEWithExpert(path_trajectories='C:\\Users\\abhin\\PycharmProjects\\sb3bleeding\\pruning_sb3\\expert_trajectories_test', use_online_data=True, use_offline_data=True,
+    assert RecurrentPPOAEWithExpert(path_trajectories='C:\\Users\\abhin\\PycharmProjects\\sb3bleeding\\apple_picking_sb3\\expert_trajectories_test', use_online_data=True, use_offline_data=True,
                                     use_ppo_offline=True, use_online_bc=True, use_awac=True, algo_size=(224,224),
                                     env = env, policy = policy, learning_rate=0.01, learning_rate_ae=0.01,
                                     learning_rate_logstd=0.01, n_steps=100, batch_size=10, n_epochs=100, ae_coeff=0.01,

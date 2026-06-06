@@ -6,7 +6,7 @@ import random
 from abc import abstractmethod
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback, EventCallback
-from pruning_sb3.pruning_gym.helpers import roundup, rounddown
+from apple_picking_sb3.pruning_gym.helpers import roundup, rounddown
 
 class PruningSetGoalCallback(BaseCallback):
     def __init__(self, verbose=0):

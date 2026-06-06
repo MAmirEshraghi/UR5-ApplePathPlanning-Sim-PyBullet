@@ -2,24 +2,24 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-from pruning_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
-from pruning_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAE
-from pruning_sb3.pruning_gym.models import AutoEncoder
+from apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
+from apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAE
+from apple_picking_sb3.pruning_gym.models import AutoEncoder
 
-from pruning_sb3.pruning_gym.callbacks.callbacks import EveryNRollouts, PruningLogCallback
-from pruning_sb3.pruning_gym.callbacks.train_callbacks import PruningTrainSetGoalCallback, \
+from apple_picking_sb3.pruning_gym.callbacks.callbacks import EveryNRollouts, PruningLogCallback
+from apple_picking_sb3.pruning_gym.callbacks.train_callbacks import PruningTrainSetGoalCallback, \
     PruningTrainRecordEnvCallback, PruningCheckpointCallback
 
-from pruning_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
 
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
 from stable_baselines3.common import utils
 from stable_baselines3.common.env_util import make_vec_env
 import argparse
-from pruning_sb3.args.args_test import \
+from apple_picking_sb3.args.args_test import \
     args
-from pruning_sb3.pruning_gym.helpers import linear_schedule, set_args, organize_args, get_policy_kwargs, make_or_bins
+from apple_picking_sb3.pruning_gym.helpers import linear_schedule, set_args, organize_args, get_policy_kwargs, make_or_bins
 
 if __name__ == "__main__":
 

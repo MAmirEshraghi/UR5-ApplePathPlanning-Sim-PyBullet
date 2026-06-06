@@ -1,6 +1,4 @@
-import os
 import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../pruning_sb3')))
 
 import numpy as np
 import torch as th
@@ -22,7 +20,7 @@ from stable_baselines3.common.utils import zip_strict
 from torch import nn
 from sb3_contrib.common.recurrent.type_aliases import RNNStates
 from stable_baselines3.common.policies import BasePolicy
-from pruning_sb3.pruning_gym.running_mean_std import RunningMeanStd
+from apple_picking_sb3.pruning_gym.running_mean_std import RunningMeanStd
 import pickle
 from stable_baselines3.common.preprocessing import get_action_dim
 
@@ -35,7 +33,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import torch.nn.functional as F
 
 # Optical flow
-from pruning_sb3.pruning_gym.optical_flow import OpticalFlow
+from apple_picking_sb3.pruning_gym.optical_flow import OpticalFlow
 
 import torch as th
 import torch.nn as nn

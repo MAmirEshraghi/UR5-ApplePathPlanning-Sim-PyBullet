@@ -11,13 +11,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath('../../'))
-from pruning_sb3.pruning_gym.models import *
+from apple_picking_sb3.pruning_gym.models import *
 import numpy as np
 import argparse
-from pruning_sb3.args.args import args
-from pruning_sb3.pruning_gym.helpers import set_args, organize_args
+from apple_picking_sb3.args.args import args
+from apple_picking_sb3.pruning_gym.helpers import set_args, organize_args
 import matplotlib.pyplot as plt
-from pruning_sb3.pruning_gym.pruning_env import ResultMode
+from apple_picking_sb3.pruning_gym.pruning_env import ResultMode
 # %%
 # Create the ArgumentParser object
 parser = argparse.ArgumentParser()

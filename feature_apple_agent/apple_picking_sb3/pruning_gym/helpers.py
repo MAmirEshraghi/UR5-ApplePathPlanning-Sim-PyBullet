@@ -184,8 +184,8 @@ def add_arg_to_env(key, val, env_name, parsed_args_dict):
 
 def make_or_bins(args, train_type, tree_type):
     # TODO: replace path with a variable instead of repeating it
-    from pruning_sb3.pruning_gym.pruning_env import PruningEnv
-    from pruning_sb3.pruning_gym.tree import Tree
+    from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
+    from apple_picking_sb3.pruning_gym.tree import Tree
     if os.path.exists(f"{tree_type}_{train_type}_or_bins_{args['tree_count']}.pkl"):
         with open(f"{tree_type}_{train_type}_or_bins_{args['tree_count']}.pkl", "rb") as f:
             or_bins = pickle.load(f)

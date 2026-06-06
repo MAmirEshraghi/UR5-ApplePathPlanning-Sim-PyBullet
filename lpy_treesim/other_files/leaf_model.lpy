@@ -1,0 +1,49 @@
+import random as rd
+def make_leaf_guide():
+  
+  x1 = rd.uniform(0,.25)
+  x2 = rd.uniform(.65,.85)
+  y1 = rd.uniform(.45,.55)
+  y2 = rd.uniform(.25,.35)
+  
+  control_points = [
+  Vector3(0,0,0),
+  Vector3(x1,y1,0),
+  Vector3(x2,y2,0),
+  Vector3(1,0,0),
+  ]
+  
+  inverse_points = [
+  Vector3(0,0,0),
+  Vector3(x1,-y1,0),
+  Vector3(x2,-y2,0),
+  Vector3(1,0,0),
+  ]
+  
+  side1 = Point3Array(control_points)
+  side2 = Point3Array(inverse_points)
+  
+  curve1 = BezierCurve2D(side1)
+  curve2 = BezierCurve2D(side2)
+  
+  return [curve1, curve2]
+
+Axiom: L
+
+derivation length: 1
+production:
+
+L:
+  nproduce SetColor(0,225,0) 
+  
+  curves = make_leaf_guide()
+  curve1 = curves[0]
+  curve2 = curves[1]
+  
+  produce _(.0025) F(.1){[SetGuide(curve1, 1) _(.001).nF(1, .1)][SetGuide(curve2, 1)_(.001).nF(1, .1)]}(True)
+  
+
+interpretation:
+
+
+endlsystem

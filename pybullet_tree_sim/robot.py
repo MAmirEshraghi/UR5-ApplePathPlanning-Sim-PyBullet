@@ -28,7 +28,7 @@ import pybullet_tree_sim.plot as plot
 
 
 import glob
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 import modern_robotics as mr
 import numpy as np
 from pathlib import Path
@@ -59,30 +59,48 @@ class Robot:
         init_joint_angles: Optional[list] = None,
         randomize_pose=False,
         verbose=True,
+        regenerate_urdf: bool = True,
     ) -> None:
         self.pbclient = pbclient
         self.verbose = verbose
         self.position = position
         self.orientation = orientation
         self.randomize_pose = randomize_pose  # TODO: This isn't set up anymore... fix
-        self.init_joint_angles = (  # TODO: dynamically assign from defaults (i.e. if linear-slider is loaded in)
-            (
-                -np.pi / 2 + np.pi / 4,
-                -np.pi * 2 / 3,
-                np.pi * 2 / 3,
-                -np.pi,
-                -np.pi / 2,
-                0,
-            )
+        # self.init_joint_angles = (  # TODO: dynamically assign from defaults (i.e. if linear-slider is loaded in)
+        #     (
+        #         -np.pi / 2 + np.pi / 4,
+        #         -np.pi * 2 / 3,
+        #         np.pi * 2 / 3,
+        #         -np.pi,
+        #         -np.pi / 2,
+        #         0,
+        #     )
+        #     if init_joint_angles is None
+        #     else init_joint_angles
+        # )
+
+        self.init_joint_angles = ( 
+            (-1.978, -1.51, 2.622, -1.896, 0.579, 0.848)
             if init_joint_angles is None
             else init_joint_angles
         )
+        
 
         # Robot setup
         self.robot = None
-        # Load robot URDF config
         self.robot_conf = {}
-        self._generate_robot_urdf()
+        if regenerate_urdf:
+            self._generate_robot_urdf()
+        else:
+            self._load_robot_conf()
+            self.robot_urdf_path = os.path.join(self._urdf_tmp_path, "robot.urdf")
+            if not os.path.isfile(self.robot_urdf_path):
+                raise FileNotFoundError(
+                    f"Cached robot URDF not found: {self.robot_urdf_path}. "
+                    "Generate it once (e.g. from a ROS environment) or construct Robot with "
+                    "regenerate_urdf=True after installing ament_index_python."
+                )
+            log.info("Using cached robot URDF (xacro skipped): %s", self.robot_urdf_path)
         self._setup_robot()
         self.num_joints = self.pbclient.getNumJoints(self.robot)
         self.robot_stack: list = self.robot_conf["robot_stack"]
@@ -90,7 +108,7 @@ class Robot:
         # Links
         self.links = self._get_links()
         self.robot_collision_filter_idxs = self._assign_collision_links()
-        self.set_collision_filter(self.robot_collision_filter_idxs)
+        self._apply_self_collision_config_from_yaml()
         self.tool0_link_idx = self._get_tool0_link_idx()
 
         # Joints
@@ -108,8 +126,8 @@ class Robot:
         self.pbclient.stepSimulation()
         return
 
-    def _generate_robot_urdf(self) -> None:
-        # Get robot params
+    def _load_robot_conf(self) -> None:
+        """Load robot.yaml + per-part YAML mappings (no xacro)."""
         self.robot_conf.update(yutils.load_yaml(os.path.join(self._robot_configs_path, "robot.yaml")))
         self.robot_conf.update({"robot_stack_qty": str(len(self.robot_conf["robot_stack"]))})
         self.robot_conf.update(
@@ -118,23 +136,21 @@ class Robot:
                 "urdf_base_path": URDF_PATH,
             }
         )
-        # Add the required urdf args from each element of the robot_stack config
         for i, robot_part in enumerate(self.robot_conf["robot_stack"]):
             robot_part = robot_part.strip().lower()
-            # Assign parent frames
             if i == 0:
                 self.robot_conf.update({f"parent{i}": "world"})
             else:
                 self.robot_conf.update({f"parent{i}": self.robot_conf["robot_stack"][i - 1]})
-            # Assign part frame ids
             self.robot_conf.update({f"robot_part{i}": self.robot_conf["robot_stack"][i]})
-            # Add each robot part's config to the robot_conf
             part_conf = yutils.load_yaml(os.path.join(self._robot_configs_path, f"{robot_part}.yaml"))
             if part_conf is not None:
                 self.robot_conf.update(part_conf)
             else:
                 raise ValueError(f"Robot part {robot_part} not found in {self._robot_configs_path}")
 
+    def _generate_robot_urdf(self) -> None:
+        self._load_robot_conf()
         log.warn(self.robot_conf)
         # Generate URDF from mappings
         robot_urdf = xutils.load_urdf_from_xacro(
@@ -620,6 +636,26 @@ class Robot:
         tf = ee_transform @ pan_tf @ tilt_tf @ base_offset_tf
         return tf
 
+    def _apply_self_collision_config_from_yaml(self) -> None:
+        """Apply robot.yaml ``disable_self_collisions`` (default off → URDF + mount filters only)."""
+        raw = self.robot_conf.get("disable_self_collisions", False)
+        if isinstance(raw, str):
+            disable_all_self = raw.strip().lower() in ("1", "true", "yes", "on")
+        else:
+            disable_all_self = bool(raw)
+
+        if disable_all_self:
+            self.disable_self_collision()
+            log.info(
+                "Robot self-collision: disabled for all link pairs (robot.yaml disable_self_collisions)."
+            )
+        else:
+            self.set_collision_filter(self.robot_collision_filter_idxs)
+            log.info(
+                "Robot self-collision: URDF defaults + mount filter pairs disabled (count=%s).",
+                len(self.robot_collision_filter_idxs),
+            )
+
     def set_collision_filter(self, robot_collision_filter_idxs) -> None:
         """Disable collision between pruner and arm"""
         for i in robot_collision_filter_idxs:
@@ -693,11 +729,24 @@ class Robot:
         except Exception as e:
             log.error(f"Error during K-D tree query: {e}", exc_info=True)
             return "UNKNOWN_KDTREE_QUERY_ERROR"
+
+    @staticmethod
+    def _vertex_label_matches_config(label: Optional[str], patterns: List[str]) -> bool:
+        """Match KD-tree labels to planner config (e.g. APPLE_12 counts as APPLE)."""
+        if label is None or not patterns:
+            return False
+        if label in patterns:
+            return True
+        if isinstance(label, str) and label.startswith("APPLE_") and "APPLE" in patterns:
+            return True
+        return False
     
     # (edit_robin) Major overhaul to use K-D tree for labeling
     def check_collisions(self,  # Eddited By Robben
-                         collision_objects: dict, 
-                         tree_object_for_labeling: 'Tree' = None) -> Tuple[bool, dict]:
+                         collision_objects: dict,
+                         tree_object_for_labeling: 'Tree' = None,
+                         acceptable_labels: Optional[List[str]] = None,
+                         unacceptable_labels: Optional[List[str]] = None) -> Tuple[bool, dict]:
         collision_info = {
             "collisions_acceptable": False,
             "collisions_unacceptable": False,
@@ -710,10 +759,20 @@ class Robot:
         # `collision_objects` here is still expected to map your high-level labels 
         # (like "TRUNK", "BRANCH" from CONFIG) to the PyBullet ID of the *whole tree*.
         # Example: {'TRUNK': whole_tree_id, 'BRANCH': whole_tree_id}
+        #
+        # Optional lists align with feature_apple_path_planning/run_apple_data_generator.py
+        # planning_config keys acceptable_collision_labels / unacceptable_collision_labels.
 
-        collision_acceptable_list = [] 
-        collision_unacceptable_env_list = ["BRANCH", "TRUNK", "APPLE", "LEAF", "SPUR"]  # Add more as needed
-        collision_unacceptable_env_list += [f"APPLE_{i}" for i in range(41)]
+        if acceptable_labels is not None:
+            collision_acceptable_list = list(acceptable_labels)
+        else:
+            collision_acceptable_list = []
+
+        if unacceptable_labels is not None:
+            collision_unacceptable_env_list = list(unacceptable_labels)
+        else:
+            collision_unacceptable_env_list = ["BRANCH", "TRUNK", "APPLE", "LEAF", "SPUR"]
+            collision_unacceptable_env_list += [f"APPLE_{i}" for i in range(41)]
 
         
         # 1. Check for "Acceptable" Environmental Collisions
@@ -764,17 +823,22 @@ class Robot:
                             
                             collision_info["collided_obstacle_label"] = determined_label
                             
-                            # Now decide if this determined_label is unacceptable
-                            if determined_label in collision_unacceptable_env_list:
+                            # Now decide if this determined_label is unacceptable / acceptable
+                            if self._vertex_label_matches_config(
+                                    determined_label, collision_unacceptable_env_list):
                                 collision_info["collisions_unacceptable"] = True
                                 log.error(f"---- UNACCEPTABLE collision with determined label '{determined_label}' at {np.round(contact_pos_on_tree, 3)} ----")
-                            elif determined_label in collision_acceptable_list: 
+                            elif self._vertex_label_matches_config(
+                                    determined_label, collision_acceptable_list):
                                 collision_info["collisions_acceptable"] = True
                                 log.warning(f"---- ACCEPTABLE collision with determined label '{determined_label}' at {np.round(contact_pos_on_tree, 3)} ----")
-                            else:  # Collision with a part of the tree not explicitly acceptable or unacceptable 
-                                # TODO: Decide how to treat these. For now, assume: unacceptable for planning.
-                                collision_info["collisions_acceptable"] = True
-                                log.warning(f"---- Collision with tree part labeled '{determined_label}' (treated as ACCEPTABLE) at {np.round(contact_pos_on_tree, 3)} ----")
+                            else:
+                                # Unlisted mesh label or unknown: treat as unacceptable (safe default).
+                                collision_info["collisions_unacceptable"] = True
+                                log.error(
+                                    f"---- UNACCEPTABLE collision (unclassified tree label) "
+                                    f"'{determined_label}' at {np.round(contact_pos_on_tree, 3)} ----"
+                                )
                             break 
 
 

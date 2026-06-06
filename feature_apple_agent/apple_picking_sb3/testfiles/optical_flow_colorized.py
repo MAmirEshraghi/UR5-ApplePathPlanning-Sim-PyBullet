@@ -2,37 +2,37 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-from pruning_sb3.pruning_gym.pruning_env import PruningEnv
-from pruning_sb3.pruning_gym.models import *
+from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_picking_sb3.pruning_gym.models import *
 import numpy as np
 import cv2
 import random
 import argparse
-from pruning_sb3.args.args_test import args
+from apple_picking_sb3.args.args_test import args
 import multiprocessing as mp
-from pruning_sb3.pruning_gym.optical_flow import OpticalFlow
+from apple_picking_sb3.pruning_gym.optical_flow import OpticalFlow
 import matplotlib.pyplot as plt
 # import torchvision.transforms.functional as F
 import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-from pruning_sb3.pruning_gym.pruning_env import PruningEnv
-from pruning_sb3.pruning_gym.models import *
+from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_picking_sb3.pruning_gym.models import *
 import numpy as np
 import cv2
 import random
 import argparse
-from pruning_sb3.args.args_test import args
-from pruning_sb3.pruning_gym.helpers import linear_schedule, exp_schedule, optical_flow_create_shared_vars, \
+from apple_picking_sb3.args.args_test import args
+from apple_picking_sb3.pruning_gym.helpers import linear_schedule, exp_schedule, optical_flow_create_shared_vars, \
     set_args, organize_args, add_arg_to_env
 import multiprocessing as mp
 import copy
-from pruning_sb3.pruning_gym.custom_callbacks import CustomTrainCallback, CustomEvalCallback
-from pruning_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAE
-from pruning_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
+from apple_picking_sb3.pruning_gym.custom_callbacks import CustomTrainCallback, CustomEvalCallback
+from apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAE
+from apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
 from stable_baselines3.common import utils
-from pruning_sb3.pruning_gym.tree import Tree
+from apple_picking_sb3.pruning_gym.tree import Tree
 import torchvision.transforms.functional as F
 
 

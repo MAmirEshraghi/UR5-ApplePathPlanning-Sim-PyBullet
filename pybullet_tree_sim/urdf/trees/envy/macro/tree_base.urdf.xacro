@@ -1,14 +1,15 @@
 <?xml version="1.0"?>
 <robot name="tree" xmlns:xacro="http://ros.org/wiki/xacro">
 
-    <xacro:macro name="tree" params="namespace tree_id tree_type parent *origin">
-        <xacro:include filename="./macro/tree_macro.urdf.xacro"/> <!-- TODO: get absolute file paths? -->
+    <xacro:macro name="tree" params="namespace tree_id tree_type parent use_visual_material:=true *origin">
+        <xacro:include filename="./macro/tree_macro.urdf.xacro"/>
 
         <xacro:tree_macro
             namespace="${namespace}"
             tree_id="${tree_id}"
             tree_type="${tree_type}"
-            parent="${parent}" >
+            parent="${parent}"
+            use_visual_material="${use_visual_material}" >
             <xacro:insert_block name="origin"/>
         </xacro:tree_macro>
 

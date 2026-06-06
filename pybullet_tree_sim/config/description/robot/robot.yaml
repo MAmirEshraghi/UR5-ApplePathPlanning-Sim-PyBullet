@@ -11,4 +11,4 @@ robot_stack:
 #     - 0.0
 #     - 0.0
 #     - 0.0
-disable_self_collisions: true
+disable_self_collisions: False

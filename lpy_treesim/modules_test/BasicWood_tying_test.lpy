@@ -1,0 +1,103 @@
+""" This file tests tying down of BasicWood class"""
+import sys
+sys.path.append('../')
+
+from stochastic_tree import BasicWood, Wire
+import random as rd
+from openalea.plantgl.all import *
+
+#Tests for growth on each axis  
+class Branch(BasicWood):
+  count = 0
+  def __init__(self, copy_from = None,  max_buds_segment: int = 5, thickness: float = 0.1,\
+               thickness_increment: float = 0.01, growth_length: float = 1., max_length: float = 7.,\
+               tie_axis: tuple = (0,1,1), order: int = 1, prototype_dict: dict = {}, name = None):
+    
+    super().__init__(copy_from, max_buds_segment,thickness, thickness_increment, growth_length,\
+               max_length, tie_axis,  order)
+    if copy_from:
+      self.__copy_constructor__(copy_from)
+    else:
+      self.prototype_dict = prototype_dict        
+        
+    if not name:
+      self.name = str(self.__class__.__name__) +'_'+ str(self.__class__.count)      
+    Branch.count+=1
+               
+  def is_bud_break(self, num_buds_segment):
+      return (rd.random() < 0.1*(1 - num_buds_segment/self.max_buds_segment))
+    
+  def create_branch(self):
+      new_ob =  Spur(copy_from = self.prototype_dict['spur'])
+      return new_ob
+  
+  def grow(self):
+    pass  
+    
+wood = Branch(tie_axis = (1,1,0), max_length = 2000, growth_length = 0.1,thickness_increment = 0) #Growth in z axis
+target = (-3, 2, 20)
+#wood = Branch(tie_axis = (1,0,1), max_length = 20, thickness_increment = 0) #Growth in y axis
+#target = (-3, 20, 2)
+#wood = Branch(tie_axis = (0,1,1), max_length = 20, thickness_increment = 0) #Growth in x axis
+#target = (-30, 2, 2)
+supp = Wire(0, target, None)
+wood.guide_target = supp
+
+num_iteration_tie = 50
+
+def StartEach(lstring):
+  if wood.tie_updated == False:
+    wood.tie_update()
+    
+  
+def EndEach(lstring):
+  global tied, supp
+  if (getIterationNb()+1)%num_iteration_tie == 0:
+    wood.update_guide(supp)
+    for j,i in enumerate(lstring):
+      if i.name == 'C':
+        if wood.guide_points:
+          print("tying")
+          lstring, count = wood.tie_lstring(lstring, j)
+          wood.tie_updated = False
+    
+  return lstring
+              
+  
+  
+module A # represent trunk apical meristem
+module C #Indicates start of wood
+
+Axiom: [@M(target)@O(1)]C/(45)&(90)GetPos(wood.start)A(wood)GetPos(wood.end)
+
+derivation length: 1000
+
+production:
+A(t) :
+  # Trunk segment
+  if wood.length >= wood.max_length:
+    nproduce *
+  else:
+    wood.grow_one()
+    nproduce I(wood.growth_length, wood.thickness)B(ParameterSet(num_buds = 0))A(t)
+  
+B(t) :
+  #Transition of buds
+  if wood.is_bud_break(t.num_buds):
+   t.num_buds+=1
+   nproduce [&(rd.random()*360)I(0.5,0.1)]B(t)
+
+I(s,r) --> I(s,r+wood.thickness_increment)
+_(r) --> _(r+wood.thickness_increment)
+
+homomorphism:
+
+I(a,r) --> F(a,r)
+S(a,r) --> F(a,r)
+ 
+###### INITIALISATION ######
+
+__lpy_code_version__ = 1.1
+
+def __initialiseContext__(context):
+	context.animation_timestep = 0.15

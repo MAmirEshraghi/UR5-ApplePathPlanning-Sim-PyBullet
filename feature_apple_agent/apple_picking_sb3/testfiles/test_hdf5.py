@@ -2,7 +2,7 @@
 import h5py
 import glob
 
-filename = 'C:\\Users\\abhin\\PycharmProjects\\sb3bleeding\\pruning_sb3\\expert_trajectories'
+filename = 'C:\\Users\\abhin\\PycharmProjects\\sb3bleeding\\apple_picking_sb3\\expert_trajectories'
 files = glob.glob(filename + "/*.hdf5")
 print(files)
 total_trajectories = 0

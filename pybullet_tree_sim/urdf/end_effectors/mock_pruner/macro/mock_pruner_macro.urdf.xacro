@@ -12,14 +12,14 @@
     <xacro:macro name="mock_pruner_macro" params="parent_link eef_prefix tof0_offset tof1_offset camera_offset mesh_base_path urdf_base_path">
         <!-- static properties -->
         <xacro:property name="mock_pruner_mass" value="0.256" />
-        <xacro:property name="base__tool0_offset" value="0.0 0.0050825 0.1601525"/>
+        <xacro:property name="base__tool0_offset" value="0.0 0.0 0.2"/>
         <!-- <xacro:property name="base__tool0_offset" value="0.0 0.0 0.20"/> -->
-        <xacro:property name="base__tof0_offset" value="${tof0_offset}"/>
+        <xacro:property name="base__tof0_offset" value="-0.0 -0.0 0.1"/>
         <xacro:property name="base__tof1_offset" value="${tof1_offset}"/>
         
         <!-- <xacro:property name="base__tof0_offset" value="${tof0_offset} 0 0.15"/> -->
         <!-- <xacro:property name="base__tof1_offset" value="${tof1_offset} 0 0.15"/> -->
-        <xacro:property name="base__camera0_offset" value="-0.0017977 -0.0715747 0.0711646"/>
+        <xacro:property name="base__camera0_offset" value="-0.0 -0.0 0.1"/>
         
         
         <!-- additional args -->
@@ -54,22 +54,22 @@
         <link name="${eef_prefix}base" >
             <visual>
                 <material name="orange">
-                    <color rgba="${255/255} ${108/255} ${10/255} 1.0"/>
+                    <color rgba="${255/255} ${255/255} ${100/255} 1.0"/>
                 </material>
-                <origin xyz="0 0 0" rpy="0 0 0"/>
+                <origin xyz="-0.04 0.0 0.0" rpy="0 0 0"/>
                 <geometry>
-                    <mesh filename="${mesh_base_path}/end_effectors/mock_pruner/MockPruner.STL" />
+                    <mesh filename="${mesh_base_path}/end_effectors/mock_pruner/mk3_gripper.STL" scale="0.001 0.001 0.001" />
                 </geometry>
             </visual>
             <collision>
-                <origin xyz="0 0 0" rpy="0 0 0"/>
+                <origin xyz="-0.04 0.0 0.0" rpy="0 0 0"/>
                 <geometry>
-                    <mesh filename="${mesh_base_path}/end_effectors/mock_pruner/MockPruner.STL" />
+                    <mesh filename="${mesh_base_path}/end_effectors/mock_pruner/mk3_gripper.STL" scale="0.001 0.001 0.001" />
                 </geometry>
             </collision>
             <inertial>
                 <mass value="${mock_pruner_mass}"/>
-                <origin xyz="0.0 0.0 0.0"/>
+                <origin xyz="0.0 0.0 0.05"/>
                 <inertia ixx="0.1" ixy="0.0" ixz="0.0" iyy="0.1" iyz="0.0" izz="0.1"/>
             </inertial>
         </link>

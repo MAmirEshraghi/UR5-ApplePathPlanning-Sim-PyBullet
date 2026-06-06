@@ -1,0 +1,94 @@
+
+import random as rd
+
+def make_apple_curve():
+  y1 = rd.uniform(.65,1)
+  y2 = rd.uniform(.8,1)
+  y3 = rd.uniform(.4,.5)
+  
+  base_points = [
+  #point 0   #point 1   #point 2         #point 3
+  (0, 0, 1), (0, y1, 1), (1, y2, 1),(1, y3, 1)
+  ]
+  
+  top_points = [
+  (0, y3, 1),(0, 0.118695, 1),(0.909233, 0.146624, 1),(1, -0.0977491, 1)
+  ]
+  
+  base_point_list = Point3Array(base_points)
+  curve1 = NurbsCurve2D(base_point_list)
+  base_curve = QuantisedFunction(curve1)
+  
+  top_point_list = Point3Array(top_points)
+  curve2 = BezierCurve2D(top_point_list)
+  top_curve = QuantisedFunction(curve2)
+  
+  return [base_curve,top_curve]
+
+
+  
+def make_stem_curve():
+  
+  points = [
+  (-1.48289, 0.982887, 1),(-0.559816, 1.22861, 1.05),(1.05126, 1.57262, 1),(1.70403, -0.0245722, 1)
+  ]
+  ctrlPointList = Point3Array(points)
+  stem_curve = NurbsCurve2D(ctrlPointList)
+  return stem_curve
+
+
+
+
+Axiom: A(.1, .09)
+
+
+derivation length: 2
+production:
+A(bh, r):
+  curves = make_apple_curve()
+  base_curve = curves[0]
+  print("BASE CURVE  " + str(base_curve) )
+  print(base_curve)
+  top_curve = curves[1]
+  nproduce SetColor(230,0,0) SectionResolution(60)
+  produce nF(bh, .01, r, base_curve) ^(180) nF(bh/5, .01, r, top_curve)^(180)S(bh/1.5, r/10)
+
+
+S(sh, r):
+  stem_curve = make_stem_curve()
+  nproduce SetColor(100,65,23) 
+  produce  SetGuide(stem_curve, sh) _(r)nF(sh, .01, r)
+
+
+
+interpretation:
+
+
+endlsystem
+###### INITIALISATION ######
+
+__lpy_code_version__ = 1.1
+
+def __initialiseContext__(context):
+	import openalea.plantgl.all as pgl
+	bc = pgl.NurbsCurve2D(	
+	    ctrlPointList = pgl.Point3Array([(0, 0, 1),(0, 1.70191, 1),(1, 2.01708, 1),(1, 0.192308, 1)]) , 
+	    )
+	bc.name = "bc"
+	parameter = pgl.NurbsCurve2D(	
+	    ctrlPointList = pgl.Point3Array([(0, 0.0195083, 1),(0, 0.994923, 1),(0.289506, 1.07946, 1),(1, 0.903884, 1)]) , 
+	    )
+	parameter.name = "parameter"
+	import openalea.plantgl.all as pgl
+	parameter_2 = pgl.BezierCurve2D(	
+	    pgl.Point3Array([(0.00549451, 0.00549451, 1),(-0.0018315, 0.204393, 1),(0.106227, 0.243688, 1),(0.106178, 0.117389, 1)]) , 
+	    )
+	parameter_2.name = "parameter_2"
+	panel_0 = ({'name': 'Panel 1', 'active': True, 'visible': True},[('Function',bc),('Function',parameter),('Curve2D',parameter_2)])
+	parameterset = [panel_0,]
+	context["__functions__"] = [('bc',bc),('parameter',parameter),]
+	context["__curves__"] = [('parameter_2',parameter_2),]
+	context["__parameterset__"] = parameterset
+	context["bc"] = pgl.QuantisedFunction(bc)
+	context["parameter"] = pgl.QuantisedFunction(parameter)
+	context["parameter_2"] = parameter_2

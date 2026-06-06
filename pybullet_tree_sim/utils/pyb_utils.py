@@ -21,6 +21,50 @@ from pybullet_tree_sim import MESHES_PATH, URDF_PATH, TEXTURES_PATH
 from zenlog import log
 
 
+def create_room_backdrop(pbclient, *, collision: bool = False) -> list[int]:
+    """Create textured room box (floor + walls + ceiling). Returns body ids."""
+    wall_texture_path = os.path.join(TEXTURES_PATH, "leaves-dead.png")
+    tex_id = pbclient.loadTexture(wall_texture_path)
+    if not collision:
+        log.info("Room backdrop: visual-only (no wall/floor collision for planning)")
+
+    def _wall(wall_dim, wall_pos, euler_rotation):
+        wall_viz = pbclient.createVisualShape(
+            shapeType=pbclient.GEOM_BOX,
+            halfExtents=wall_dim,
+        )
+        wall_col = (
+            pbclient.createCollisionShape(
+                shapeType=pbclient.GEOM_BOX,
+                halfExtents=wall_dim,
+            )
+            if collision
+            else -1
+        )
+        wall_id = pbclient.createMultiBody(
+            baseMass=0,
+            baseVisualShapeIndex=wall_viz,
+            baseCollisionShapeIndex=wall_col,
+            basePosition=wall_pos,
+            baseOrientation=list(pbclient.getQuaternionFromEuler(euler_rotation)),
+        )
+        pbclient.changeVisualShape(
+            objectUniqueId=wall_id,
+            linkIndex=-1,
+            textureUniqueId=tex_id,
+            rgbaColor=[1.0, 1.0, 1.0, 1.0],
+        )
+        return wall_id
+
+    return [
+        _wall([0.01, 5, 5], [0, 0, 0], [0, np.pi / 2, 0]),
+        _wall([0.01, 5, 5], [0, -2, 5], [np.pi / 2, 0, np.pi / 2]),
+        _wall([0.01, 5, 5], [-5, 0, 5], [0, 0, 0]),
+        _wall([0.01, 5, 5], [5, 0, 5], [0, 0, 0]),
+        _wall([0.01, 5, 5], [0, 0, 10], [0, np.pi / 2, 0]),
+    ]
+
+
 class PyBUtils:
     def __init__(self, renders: bool = False) -> None:
         self.viz_view_matrix = None
@@ -30,7 +74,7 @@ class PyBUtils:
         # self.cam_width = cam_width
         self.near_val = 0.02
         self.far_val = 4.0
-        self.step_time = 1 / 4
+        self.step_time = 1 / 240  #1/4 (old)
 
         # Debug parameters
         self.debug_items_step = []
@@ -59,6 +103,8 @@ class PyBUtils:
             cameraPitch=-12.48,
             cameraTargetPosition=[-0.3, -0.06, 1.0],
         )
+        if self.renders:
+            self.configure_debug_visualizer_lighting()
         self.create_background()
         # self.setup_bird_view_visualizer()
         return
@@ -73,20 +119,63 @@ class PyBUtils:
         log.info(f"Gravity enabled ({-grav} m/s^2).")
         return
 
+    def configure_debug_visualizer_lighting(self) -> None:
+        """GUI tweaks supported by this PyBullet build (no light*Coeff kwargs)."""
+        pb = self.pbclient
+        pb.configureDebugVisualizer(pb.COV_ENABLE_RGB_BUFFER_PREVIEW, 0)
+        if hasattr(pb, "COV_ENABLE_SHADOWS"):
+            pb.configureDebugVisualizer(pb.COV_ENABLE_SHADOWS, 0)
+        # Nov 2023 bindings accept lightPosition / shadowMapResolution only (not lightAmbientCoeff).
+        pb.configureDebugVisualizer(lightPosition=[2.0, 3.0, 4.0])
+        pb.configureDebugVisualizer(shadowMapResolution=2048)
+
+    def reset_simulation_scene(
+        self,
+        gravity: float = 0.0,
+        *,
+        room_collision: bool = False,
+        room_backdrop: bool = True,
+    ) -> None:
+        """Clear the world and optionally recreate the textured room backdrop.
+
+        Call after PyBUtils() whenever code uses resetSimulation() before loading
+        robot/tree (ApplePickingEnv, scene tests, etc.). resetSimulation removes
+        bodies created in __init__, including the background from create_background().
+
+        room_collision: when False (default for apple planning), backdrop is visual-only.
+        room_backdrop: when False, skip create_background (robot-only debug in tree viewer).
+        """
+        self.pbclient.resetSimulation()
+        self.pbclient.setGravity(0, 0, gravity)
+        if self.renders:
+            self.configure_debug_visualizer_lighting()
+        if room_backdrop:
+            self.create_background(collision=room_collision)
+        else:
+            log.info(
+                "Room backdrop: disabled (room_backdrop=False); robot/tree only for debug"
+            )
+
     def create_wall_with_texture(
         self,
         wall_dim: List,
         wall_pos: List,
         euler_rotation: List,
         wall_texture: int,
+        *,
+        collision: bool = True,
     ):
         wall_viz = self.pbclient.createVisualShape(
             shapeType=self.pbclient.GEOM_BOX,
             halfExtents=wall_dim,
         )
-        wall_col = self.pbclient.createCollisionShape(
-            shapeType=self.pbclient.GEOM_BOX,
-            halfExtents=wall_dim,
+        wall_col = (
+            self.pbclient.createCollisionShape(
+                shapeType=self.pbclient.GEOM_BOX,
+                halfExtents=wall_dim,
+            )
+            if collision
+            else -1
         )
         wall_id = self.pbclient.createMultiBody(
             baseMass=0,
@@ -95,23 +184,21 @@ class PyBUtils:
             basePosition=wall_pos,
             baseOrientation=list(self.pbclient.getQuaternionFromEuler(euler_rotation)),
         )
-        self.pbclient.changeVisualShape(objectUniqueId=wall_id, linkIndex=-1, textureUniqueId=wall_texture)
+        self.pbclient.changeVisualShape(
+            objectUniqueId=wall_id,
+            linkIndex=-1,
+            textureUniqueId=wall_texture,
+            rgbaColor=[1.0, 1.0, 1.0, 1.0],
+        )
         return wall_id
 
-    def create_background(self) -> None:
-        wall_texture_path = os.path.join(TEXTURES_PATH, "leaves-dead.png")
-        self.wall_texture = self.pbclient.loadTexture(wall_texture_path)
-
-        self.floor_id = self.create_wall_with_texture([0.01, 5, 5], [0, 0, 0], [0, np.pi / 2, 0], self.wall_texture)
-        self.wall_id = self.create_wall_with_texture(
-            [0.01, 5, 5],
-            [0, -2, 5],
-            [np.pi / 2, 0, np.pi / 2],
-            self.wall_texture,
-        )
-        self.side_wall_1_id = self.create_wall_with_texture([0.01, 5, 5], [-5, 0, 5], [0, 0, 0], self.wall_texture)
-        self.side_wall_2_id = self.create_wall_with_texture([0.01, 5, 5], [5, 0, 5], [0, 0, 0], self.wall_texture)
-        self.ceil_id = self.create_wall_with_texture([0.01, 5, 5], [0, 0, 10], [0, np.pi / 2, 0], self.wall_texture)
+    def create_background(self, *, collision: bool = True) -> None:
+        ids = create_room_backdrop(self.pbclient, collision=collision)
+        self.floor_id = ids[0]
+        self.wall_id = ids[1]
+        self.side_wall_1_id = ids[2]
+        self.side_wall_2_id = ids[3]
+        self.ceil_id = ids[4]
         return
 
     def remove_debug_items(self, where) -> None:
