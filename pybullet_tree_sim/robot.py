@@ -22,6 +22,7 @@ from pybullet_tree_sim.utils.pyb_utils import PyBUtils
 import pybullet_tree_sim.utils.camera_helpers as ch
 import pybullet_tree_sim.utils.xacro_utils as xutils
 import pybullet_tree_sim.utils.yaml_utils as yutils
+from pybullet_tree_sim.utils.robot_meshes import bundle as bundle_robot_meshes
 from pybullet_tree_sim import CONFIG_PATH, MESHES_PATH, URDF_PATH
 
 import pybullet_tree_sim.plot as plot
@@ -158,14 +159,17 @@ class Robot:
         # UR_description uses filename="package://<>" for meshes, and this doesn't work with pybullet
         for i, robot_part in enumerate(self.robot_conf["robot_stack"]):
             if robot_part.startswith("ur"):
-                ur_absolute_mesh_path = "/opt/ros/humble/share/ur_description/meshes"
+                from ament_index_python.packages import get_package_share_directory  # ROS 2, needed for xacro anyway
+
+                ur_absolute_mesh_path = os.path.join(get_package_share_directory("ur_description"), "meshes")
                 robot_urdf = robot_urdf.replace(
                     f'filename="package://ur_description/meshes',
                     f'filename="{ur_absolute_mesh_path}',
                 )
-        # Save the generated URDF
+        # Save the generated URDF, then bundle its meshes so it loads on machines without ROS
         self.robot_urdf_path = os.path.join(self._urdf_tmp_path, "robot.urdf")
         xutils.save_urdf(robot_urdf, urdf_path=self.robot_urdf_path)
+        bundle_robot_meshes(Path(self.robot_urdf_path))
         return
 
     def _setup_robot(self):
