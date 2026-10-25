@@ -34,6 +34,14 @@ import torch.nn.functional as F
 
 # Optical flow
 from apple_picking_sb3.pruning_gym.optical_flow import OpticalFlow
+from feature_apple_path_planning.obs_spec import (
+    CHANNEL_DIMS,
+    DEPTH_MAX_M,
+    DEPTH_UNITS_PER_M,
+    FLOW_SCALE,
+    IMAGE_KEYS,
+    parse_image_channels,
+)
 
 import torch as th
 import torch.nn as nn
@@ -544,10 +552,16 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
             enable_critic_lstm: bool = True,
             lstm_kwargs: Optional[Dict[str, Any]] = None,
             features_dim_critic_add: Optional[int] = None,
-            use_optical_flow=True,
+            image_channels=("flow", "mask"),
             algo_size=(224, 224)
     ):
         self.lstm_output_dim = lstm_hidden_size
+        # CNN input = selected image channels stacked at algo_size (see obs_spec); () = proprio only
+        self.image_channels = parse_image_channels(image_channels)
+        features_extractor_kwargs = {
+            **(features_extractor_kwargs or {}),
+            "in_channels": max(1, sum(CHANNEL_DIMS[c] for c in self.image_channels)),
+        }
         super().__init__(
             observation_space,
             action_space,
@@ -571,7 +585,6 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         self.lstm_kwargs = lstm_kwargs or {}
         self.shared_lstm = shared_lstm
         self.enable_critic_lstm = enable_critic_lstm
-        self.use_optical_flow = use_optical_flow
         self.algo_size = algo_size
         self.actor_feature_proj, self.critic_feature_proj = self._build_feature_projections(
             observation_space
@@ -600,7 +613,7 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         # (size of the output of the actor lstm)
         if not (self.shared_lstm or self.enable_critic_lstm):
             self.critic = nn.Linear(self.features_dim, lstm_hidden_size)
-        if self.use_optical_flow:
+        if "flow" in self.image_channels:
             self.optical_flow_model = OpticalFlow(size=self.algo_size)
         # Use a separate LSTM for the critic
         # TODO: TEST
@@ -640,26 +653,27 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
                                                      **self.optimizer_kwargs)
 
     @staticmethod
-    def _tabular_obs_dim(observation_space: spaces.Space) -> int:
-        skip = {"rgb", "prev_rgb", "point_mask", "optical_flow"}
-        return sum(
-            observation_space[k].shape[0]
-            for k in sorted(observation_space.spaces.keys())
-            if k not in skip and not k.startswith("critic")
-        )
+    def _tabular_keys(keys) -> List[str]:
+        """Non-image observation keys, in the fixed (sorted) order they are concatenated."""
+        return [k for k in sorted(keys) if k not in IMAGE_KEYS and "critic" not in k]
+
+    def _tabular_obs_dim(self, observation_space: spaces.Space) -> int:
+        return sum(observation_space[k].shape[0] for k in self._tabular_keys(observation_space.spaces.keys()))
 
     def _build_feature_projections(self, observation_space: spaces.Space):
         """Eager Linear projections so weights save/load and train with the policy."""
         tabular_dim = self._tabular_obs_dim(observation_space)
-        with th.no_grad():
-            probe = th.zeros(
-                1,
-                self.features_extractor.in_channels,
-                self.algo_size[0],
-                self.algo_size[1],
-                device=self.device,
-            )
-            encoder_dim = int(self.features_extractor(probe).shape[-1])
+        encoder_dim = 0
+        if self.image_channels:
+            with th.no_grad():
+                probe = th.zeros(
+                    1,
+                    self.features_extractor.in_channels,
+                    self.algo_size[0],
+                    self.algo_size[1],
+                    device=self.device,
+                )
+                encoder_dim = int(self.features_extractor(probe).shape[-1])
         concat_dim = tabular_dim + encoder_dim
         actor_proj = (
             nn.Identity()
@@ -836,8 +850,7 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         return actions, values, log_prob, RNNStates(lstm_states_pi, lstm_states_vf)
 
     def forward_expert(self, obs, lstm_states, episode_starts, action):
-        use_cached = getattr(self, "use_cached_optical_flow", True)
-        features = self.extract_features(obs, use_cached_optical_flow=use_cached)
+        features = self.extract_features(obs)
 
         if self.share_features_extractor:
             pi_features = vf_features = features  # alis
@@ -868,8 +881,7 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
 
     def bc_action_mse(self, obs, lstm_states, episode_starts, expert_actions) -> th.Tensor:
         """BC loss on squashed actions — avoids tanh log-det saturation gaming."""
-        use_cached = getattr(self, "use_cached_optical_flow", True)
-        features = self.extract_features(obs, use_cached_optical_flow=use_cached)
+        features = self.extract_features(obs)
         if self.share_features_extractor:
             pi_features = vf_features = features
         else:
@@ -885,74 +897,47 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
             target = target.view_as(pred)
         return F.mse_loss(pred, target)
 
-    def get_depth_proxy(self, rgb, prev_rgb, point_mask):
-        optical_flow = self.optical_flow_model.calculate_optical_flow(rgb, prev_rgb)
+    def _image_stack(self, obs) -> th.Tensor:
+        """Stack the selected image channels at algo_size: flow (2) | depth (1) | mask (1), each ~[0, 1]."""
+        size = tuple(self.algo_size)
+        parts = []
+        for channel in self.image_channels:
+            if channel == "flow":
+                flow = self.optical_flow_model.calculate_optical_flow(obs["rgb"], obs["prev_rgb"])
+                parts.append(flow.to(self.device, th.float32) * FLOW_SCALE)
+            elif channel == "depth":
+                depth_m = obs["depth"].to(self.device, th.float32).unsqueeze(1) / DEPTH_UNITS_PER_M
+                depth_m = F.interpolate(depth_m, size=size, mode="nearest")
+                parts.append(th.clamp(depth_m, 0.0, DEPTH_MAX_M) / DEPTH_MAX_M)
+            elif channel == "mask":
+                mask = obs["point_mask"].to(self.device, th.float32).unsqueeze(1)
+                parts.append(F.interpolate(mask, size=size, mode="bilinear", align_corners=False))
+        return th.cat(parts, dim=1)
 
-        if point_mask.ndim == 3:
-            point_mask = point_mask.unsqueeze(1)
-        elif point_mask.ndim == 2:
-            point_mask = point_mask.unsqueeze(0).unsqueeze(0)
-
-        flow_h, flow_w = optical_flow.shape[-2:]
-        if point_mask.shape[-2:] != (flow_h, flow_w):
-            point_mask = F.interpolate(
-                point_mask.float(), size=(flow_h, flow_w),
-                mode="bilinear", align_corners=False
-            )
-
-        point_mask = point_mask.to(optical_flow.device, optical_flow.dtype)
-        depth_proxy = th.cat((optical_flow, point_mask), dim=1)
-
-        return depth_proxy
-
-    def extract_features(self, obs: th.Tensor, use_cached_optical_flow:bool = False):  # -> tuple[th.Tensor, th.Tensor]:
+    def extract_features(self, obs: th.Tensor):  # -> tuple[th.Tensor, th.Tensor]:
         """
-        Preprocess the observation if needed and extract features.
+        Concatenate the tabular observations (sorted keys) with the CNN encoding of the image channels.
 
         :param obs:
         :return:
         """
         assert self.features_extractor is not None, "No features extractor was set"
-        if use_cached_optical_flow: #Using cached optical flow
-            point_mask = obs['point_mask']
-            if point_mask.ndim == 3:
-                point_mask = point_mask.unsqueeze(1)
-            elif point_mask.ndim == 2:
-                point_mask = point_mask.unsqueeze(0).unsqueeze(0)
-
-            flow_h, flow_w = obs['optical_flow'].shape[-2:]
-            if point_mask.shape[-2:] != (flow_h, flow_w):
-                point_mask = F.interpolate(
-                    point_mask.float(), size=(flow_h, flow_w),
-                    mode="bilinear", align_corners=False
-                )
-
-            point_mask = point_mask.to(self.device)
-            depth_proxy = th.cat((obs['optical_flow'], point_mask), dim=1).to(self.device)
-        else:
-            depth_proxy = self.get_depth_proxy(obs['rgb'], obs['prev_rgb'], obs['point_mask'])
-
-        image_features = self.features_extractor(depth_proxy)
-        #Sort keys in alphabetical order to maintain consistency and remove dependency on insertion order
-        obs_keys = sorted(obs.keys())
-        features_actor = th.cat([obs[i] for i in obs_keys if 'critic' not in i and 'rgb' not in i
-                                 and 'prev_rgb' not in i and 'point_mask' not in i and 'optical_flow' not in i], dim=1).to(th.float32)
-        features_actor = th.cat([features_actor, image_features], dim=1).to(th.float32)
-        features_actor = self._project_features_if_needed(features_actor, self.lstm_actor.input_size, "actor_feature_proj")
+        tabular = [obs[k] for k in self._tabular_keys(obs.keys())]
+        if self.image_channels:
+            tabular.append(self.features_extractor(self._image_stack(obs)))
+        concat = th.cat([t.to(self.device, th.float32) for t in tabular], dim=1)
+        features_actor = self._project_features_if_needed(concat, self.lstm_actor.input_size, "actor_feature_proj")
 
         features = features_actor
 
         if self.share_features_extractor is False:
-            features_critic = th.cat([obs[i] for i in obs_keys if 'rgb' not in i
-                                      and 'prev_rgb' not in i and 'point_mask' not in i and 'optical_flow' not in i],
-                                     dim=1).to(th.float32)
-            features_critic = th.cat([features_critic, image_features], dim=1).to(th.float32)
+            features_critic = concat
             if self.lstm_critic is not None:
                 features_critic = self._project_features_if_needed(
                     features_critic, self.lstm_critic.input_size, "critic_feature_proj")
             features = (features_actor, features_critic)
 
-        return features#, depth_proxy, image_features[1]
+        return features
 
     def _project_features_if_needed(self, features: th.Tensor, target_dim: int, proj_attr: str) -> th.Tensor:
         """Project concatenated obs features to LSTM input size."""
@@ -986,8 +971,7 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         :return: the action distribution and new hidden states.
         """
 
-        use_cached = getattr(self, "use_cached_optical_flow", False)
-        features = self.extract_features(obs, use_cached_optical_flow=use_cached)
+        features = self.extract_features(obs)
         if self.features_dim_critic_add is not None:
             actor_features = features[0]
         else:
@@ -999,7 +983,7 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
     def predict_values(self,
                        obs: th.Tensor,
                        lstm_states: Tuple[th.Tensor, th.Tensor],
-                       episode_starts: th.Tensor, use_cached_optical_flow: bool = False) -> th.Tensor:
+                       episode_starts: th.Tensor) -> th.Tensor:
         """
         Get the estimated values according to the current policy given the observations.
 
@@ -1010,7 +994,7 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         :return: the estimated values.
         """
         # Call the method from the parent of the parent class
-        features = self.extract_features(obs, use_cached_optical_flow)  # , self.vf_features_extractor)
+        features = self.extract_features(obs)
 
         if self.lstm_critic is not None:
             if self.features_dim_critic_add is not None:
@@ -1030,7 +1014,7 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         return self.value_net(latent_vf)
 
     def evaluate_actions(
-            self, obs: th.Tensor, actions: th.Tensor, lstm_states: RNNStates, episode_starts: th.Tensor, use_cached_optical_flow: bool = False
+            self, obs: th.Tensor, actions: th.Tensor, lstm_states: RNNStates, episode_starts: th.Tensor
     ) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:
         """
         Evaluate actions according to the current policy,
@@ -1047,7 +1031,7 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         # Calculate running mean and var for observation normalization
 
         # Preprocess the observation if needed
-        features = self.extract_features(obs, use_cached_optical_flow)
+        features = self.extract_features(obs)
         #Check if any nan values
         # for i, feat in enumerate(features):
         #     assert not th.isnan(feat).any(), "Nan values in features "+str(i) + " " + str(feat)

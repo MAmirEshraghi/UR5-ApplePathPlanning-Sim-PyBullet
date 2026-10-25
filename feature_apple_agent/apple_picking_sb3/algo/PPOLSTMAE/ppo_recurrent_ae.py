@@ -31,6 +31,8 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader, IterableDataset
 import h5py
 
+from feature_apple_path_planning import agent_data
+
 SelfRecurrentPPOAE = TypeVar("SelfRecurrentPPOAE", bound="RecurrentPPOAE")
 
 
@@ -604,13 +606,15 @@ class RecurrentPPOAE(OnPolicyAlgorithm):
 
 
 class TrajectoryIterableDataset(IterableDataset):
-    """Load expert trajectories from one HDF5 file or all ``*.hdf5`` in a directory."""
+    """Stream expert transitions (agent-data schema v2) from one HDF5 file or all ``*.hdf5`` in a directory."""
 
-    def __init__(self, hdf5_file_path, verbose=1):
+    def __init__(self, hdf5_file_path, obs_keys, verbose=1):
         """
         :param hdf5_file_path: Path to a single ``.hdf5`` file, or a directory of ``*.hdf5`` files.
+        :param obs_keys: observation keys to load (the policy's observation space keys).
         """
         self.hdf5_file_path = os.path.abspath(os.path.expanduser(hdf5_file_path))
+        self.obs_keys = list(obs_keys)
         self.verbose = verbose
         if os.path.isfile(self.hdf5_file_path) and self.hdf5_file_path.lower().endswith(".hdf5"):
             self.hdf5_files = [self.hdf5_file_path]
@@ -620,48 +624,36 @@ class TrajectoryIterableDataset(IterableDataset):
             print(f"INFO: Found {len(self.hdf5_files)} HDF5 files")
             print(f"INFO: {self.hdf5_files}")
         assert len(self.hdf5_files) > 0, "ERROR: No HDF5 files found"
-        # Make key to file mapping
+        # Make key to file mapping; fail fast on old schema or missing observation keys
         self.traj_to_file = {}
         for file in self.hdf5_files:
             with h5py.File(file, 'r') as f:
                 for key in f.keys():
+                    if not bool(f[key].attrs["success"]):  # BC clones successful demos only
+                        continue
+                    missing = set(self.obs_keys) - set(agent_data.frame_keys(f[key]))
+                    if missing:
+                        raise KeyError(f"{file}:{key} lacks observation keys {sorted(missing)}")
                     self.traj_to_file[key] = file
+        assert self.traj_to_file, "ERROR: no successful expert trajectories to clone"
+        if self.verbose > 0:
+            print(f"INFO: BC uses {len(self.traj_to_file)} successful trajectories")
 
     def trajectory_generator(self, expert_traj, worker_id):
         """
         Generator that yields each step from the trajectory inside an HDF5 file.
         """
-        actions = expert_traj['actions']
-        observations_group = expert_traj['observations']
-        next_observations_group = expert_traj['next_observations']
-        rewards = expert_traj['rewards']
-        dones = expert_traj['dones']
-
-        num_steps = len(actions)
-
-        for step in range(num_steps):
-            action = actions[step]
-            reward = rewards[step]
-            done = dones[step]
-            observation_dict = {}
-            for key, value in observations_group.items():
-                observation_dict[key] = value[step]
-            next_observation_dict = {}
-            for key, value in next_observations_group.items():
-                next_observation_dict[key] = value[step]
-            # Yielding a dictionary containing all components for a single step
-            sample = {
-                'observation': observation_dict,
+        for step, (obs, action, reward, done, next_obs) in enumerate(
+                agent_data.iter_transitions(expert_traj, self.obs_keys)):
+            yield {
+                'observation': obs,
                 'action': action,
                 'reward': reward,
-                'done': done,
-                'next_observation': next_observation_dict,
+                'done': done,  # episode boundary (end of trajectory)
+                'next_observation': next_obs,
                 'worker_id': worker_id,
                 'step': step,
             }
-            # if self.verbose > 1:
-            # print(f"Worker {worker_id} yielding step {step}")
-            yield sample
 
     def __iter__(self):
         """
@@ -670,11 +662,6 @@ class TrajectoryIterableDataset(IterableDataset):
         """
         worker_id = 0
         worker_info = torch.utils.data.get_worker_info()
-
-        # Open the single HDF5 file (shared across all workers)
-        # with h5py.File(self.hdf5_file_path, 'r') as hdf5_file:
-        # Get the list of all trajectory datasets in the HDF5 file
-        # trajectory_names = list(hdf5_file.keys())  # Each trajectory is a key (group) in the HDF5 file
         trajectory_names = list(self.traj_to_file.keys())
         if worker_info is not None:  # Multi-worker case
             # Shuffle the dataset list for each worker
@@ -684,19 +671,15 @@ class TrajectoryIterableDataset(IterableDataset):
         # Loop through the trajectories indefinitely (for continual sampling)
         while True:
             for trajectory_name in trajectory_names:
-                # Open the trajectory group in the HDF5 file
                 with h5py.File(self.traj_to_file[trajectory_name], 'r') as hdf5_file:
-                    # Open the trajectory group in the HDF5 file
-                    expert_traj = hdf5_file[trajectory_name]
-                    # Yield each step from the trajectory using the generator
-                    yield from self.trajectory_generator(expert_traj, worker_id)
+                    yield from self.trajectory_generator(hdf5_file[trajectory_name], worker_id)
 
 
 class RecurrentPPOAEWithExpert(RecurrentPPOAE):
     """Allows use of data collected offline along with online data for training. The offline data is stored in a folder as hdf5 files."""
 
     def __init__(self, path_trajectories, use_online_data, use_offline_data, use_ppo_offline, use_online_bc, use_awac,
-                 algo_size, bc_coeff, use_cached_optical_flow,
+                 algo_size, bc_coeff,
                  *args, **kwargs):
         self.bc_only = bool(kwargs.pop("bc_only", False))
         if "_init_setup_model" in kwargs:
@@ -711,7 +694,6 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
         self.use_awac = use_awac
         self.algo_size = algo_size
         self.bc_coeff = bc_coeff
-        self.use_cached_optical_flow = use_cached_optical_flow
 
         self.collect_online_data = self.use_online_data or self.use_ppo_offline or self.use_online_bc or self.use_awac
         if self.bc_only:
@@ -719,19 +701,6 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
         self.collect_offline_data = self.use_offline_data or self.use_ppo_offline or self.use_awac or self.use_online_bc
 
         self.path_trajectories = path_trajectories
-
-        self.observation_space_expert = deepcopy(self.observation_space)
-
-        if self.use_cached_optical_flow:
-            if self.verbose > 0:
-                print("INFO: Using cached optical flow")
-            del self.observation_space_expert.spaces['rgb']
-            del self.observation_space_expert.spaces['prev_rgb']
-            self.observation_space_expert.spaces['optical_flow'] = spaces.Box(low=-100, high=+100, shape=(
-            2, self.algo_size[0], self.algo_size[1]), dtype=np.float32)
-        else:
-            if self.verbose > 0:
-                print("INFO: NOT using cached optical flow")
 
         self._last_obs_expert = None  # type: Optional[Union[np.ndarray, Dict[str, np.ndarray]]]
         self._last_episode_starts_expert = None  # type: Optional[np.ndarray]
@@ -742,7 +711,6 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
 
     def _setup_model(self) -> None:
         super()._setup_model()
-        self.policy.use_cached_optical_flow = self.use_cached_optical_flow
         # self.expert_buffer = copy.deepcopy(self.rollout_buffer)  # Same structure as rollout buffer
         # No copy, only freedom
         self.num_expert_envs = self.n_envs
@@ -764,7 +732,7 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
         )
         self.expert_buffer = buffer_cls(
             self.n_steps,
-            self.observation_space_expert,
+            self.observation_space,  # expert data carries the same observation keys as the env
             self.action_space,
             hidden_state_buffer_shape,
             self.device,
@@ -773,7 +741,7 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
             n_envs=self.n_envs,
         )
         # expert_data = self.get_trajectory_files()  # Load file names only
-        self.dataset = TrajectoryIterableDataset(self.path_trajectories)
+        self.dataset = TrajectoryIterableDataset(self.path_trajectories, self.observation_space.spaces.keys())
         self.dataloader = DataLoader(self.dataset, batch_size=1, num_workers=self.num_expert_envs,
                                      collate_fn=self.ds_collate)
         self.data_iter = iter(self.dataloader)
@@ -847,7 +815,7 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
                 batches.append(batch[0])
             batch = self.np_collate_fn(batches, self.num_expert_envs)
 
-            last_obs = self._flatten_obs(batch['observation'], self.observation_space_expert)
+            last_obs = self._flatten_obs(batch['observation'], self.observation_space)
             rewards = batch['reward']
             dones = batch['done']
             actions = batch['action']
@@ -881,13 +849,13 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
             self._last_lstm_states_expert = lstm_states  # These get reset in forward_expert (process_sequence)
 
         next_obs = self._flatten_obs(batch['next_observation'],
-                                     self.observation_space_expert)  # Get the next observation to calculate the values
+                                     self.observation_space)  # Get the next observation to calculate the values
 
         with th.no_grad():
             # Compute value for the last timestep
             episode_starts = th.tensor(dones, dtype=th.float32, device=self.device)
             values = self.policy.predict_values(obs_as_tensor(next_obs, self.device), lstm_states.vf,
-                                                episode_starts, use_cached_optical_flow=self.use_cached_optical_flow) # pylint: disable=unexpected-keyword-arg
+                                                episode_starts)
         expert_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
 
         if self.verbose > 0:
@@ -1112,7 +1080,6 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
             actions_offline,
             batch_offline.lstm_states,
             batch_offline.episode_starts,
-            use_cached_optical_flow=self.use_cached_optical_flow
         )
 
         min_log_prob = -20  # TODO: Is this necessary?
@@ -1342,7 +1309,6 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
             actions,
             batch.lstm_states,
             batch.episode_starts,
-            use_cached_optical_flow=self.use_cached_optical_flow
         )
 
         values = values.flatten()
@@ -1784,9 +1750,6 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
         # Required by __init__ before __dict__.update(data); prefer explicit load kwargs over zip.
         _algo_size = kwargs.pop("algo_size", data.get("algo_size", (224, 224)))
         _bc_coeff = kwargs.pop("bc_coeff", data.get("bc_coeff", 2.0))
-        _use_cached_optical_flow = kwargs.pop(
-            "use_cached_optical_flow", data.get("use_cached_optical_flow", True)
-        )
         _bc_only = kwargs.pop("bc_only", data.get("bc_only", False))
         _explicit_expert_hdf5 = path_trajectories
         if path_trajectories is None:
@@ -1802,7 +1765,6 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
             use_ppo_offline=use_ppo_offline,
             algo_size=_algo_size,
             bc_coeff=_bc_coeff,
-            use_cached_optical_flow=_use_cached_optical_flow,
             policy=data["policy_class"],
             env=env,
             device=device,
@@ -1823,7 +1785,6 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
                     f"(checkpoint had {ckpt_path})",
                     flush=True,
                 )
-        model.use_cached_optical_flow = _use_cached_optical_flow
         model.bc_only = _bc_only
         if _bc_only:
             model.collect_online_data = False

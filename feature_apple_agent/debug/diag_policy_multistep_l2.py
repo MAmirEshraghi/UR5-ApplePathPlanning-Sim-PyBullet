@@ -98,12 +98,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Torch device for policy/RAFT. auto=cuda if free else cpu; "
         "cuda falls back to cpu with a warning if the GPU/driver is unavailable (default: auto)",
     )
-    parser.add_argument(
-        "--use_cached_optical_flow",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="False=live RAFT on sim rgb (default, matches tree08 v2 training).",
-    )
     return parser
 
 

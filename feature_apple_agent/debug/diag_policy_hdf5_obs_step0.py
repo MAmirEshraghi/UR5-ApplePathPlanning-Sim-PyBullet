@@ -32,30 +32,18 @@ def main() -> None:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--n_episodes", type=int, default=5)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument(
-        "--use_cached_optical_flow",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Use HDF5 optical_flow in policy (default: True for this test).",
-    )
     args = parser.parse_args()
 
     def _run() -> dict:
         episode_keys, _ = sample_episode_keys(args.run_id, args.n_episodes, args.seed)
-        env, _, hdf5_path = setup_env(args.run_id)
+        env, _, hdf5_path = setup_env(args.run_id, checkpoint=args.checkpoint)
         print(
             f"[diag:hdf5_obs] checkpoint={Path(args.checkpoint).resolve()} "
-            f"use_cached_optical_flow={args.use_cached_optical_flow} n={len(episode_keys)} seed={args.seed}",
+            f"n={len(episode_keys)} seed={args.seed}",
             flush=True,
         )
-        model = load_policy(
-            args.checkpoint,
-            env,
-            hdf5_path,
-            use_cached_optical_flow=args.use_cached_optical_flow,
-        )
+        model = load_policy(args.checkpoint, env, hdf5_path)
         model.policy.set_training_mode(False)
-        model.policy.use_cached_optical_flow = args.use_cached_optical_flow
         proj = getattr(model.policy, "actor_feature_proj", None)
         if isinstance(proj, th.nn.Linear):
             print(
@@ -101,7 +89,6 @@ def main() -> None:
             "script": "diag_policy_hdf5_obs_step0",
             "run_id": args.run_id,
             "checkpoint": str(Path(args.checkpoint).resolve()),
-            "use_cached_optical_flow": args.use_cached_optical_flow,
             "seed": args.seed,
             "summary": summary,
             "episodes": records,

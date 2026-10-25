@@ -7,6 +7,7 @@ import json
 import os
 import random
 import sys
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -22,31 +23,30 @@ if _AGENT_DIR not in sys.path:
 
 from feature_apple_path_planning.apple_picking_env import ApplePickingEnv
 from feature_apple_path_planning.run_apple_data_generator import CONFIG as APPLE_PICKING_CONFIG
+from feature_apple_path_planning import agent_data
 from apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAEWithExpert
 from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.save_util import json_to_data
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from train_apple_picking_expert import _apply_tree_setup_for_training, _log_train_data
 
 
 def _load_expert_metadata(hdf5_path: str) -> Tuple[List[str], Dict[str, dict]]:
-    trajectory_keys: List[str] = []
-    metadata_cache: Dict[str, dict] = {}
     with h5py.File(hdf5_path, "r") as f:
         trajectory_keys = list(f.keys())
-        for key in trajectory_keys:
-            grp = f[key]
-            meta = {attr: grp.attrs[attr] for attr in grp.attrs.keys()}
-            if (
-                "initial_joint_angles" not in meta
-                and "observations" in grp
-                and "joint_angles" in grp["observations"]
-            ):
-                enc = np.asarray(grp["observations"]["joint_angles"][0], dtype=np.float64).reshape(-1)
-                half = len(enc) // 2
-                meta["initial_joint_angles"] = np.arctan2(enc[:half], enc[half:]).astype(np.float64)
-            metadata_cache[key] = meta
+        metadata_cache = {key: agent_data.trajectory_metadata(f[key]) for key in trajectory_keys}
     return trajectory_keys, metadata_cache
+
+
+def checkpoint_image_channels(checkpoint_path: Path) -> tuple:
+    """Image channels the checkpoint's policy was built with (read without loading weights)."""
+    with zipfile.ZipFile(checkpoint_path) as archive:
+        data = json_to_data(archive.read("data").decode())
+    policy_kwargs = data.get("policy_kwargs", {})
+    if "image_channels" not in policy_kwargs:
+        raise ValueError(f"{checkpoint_path} predates image_channels / agent-data schema v2; retrain it.")
+    return tuple(policy_kwargs["image_channels"])
 
 
 def _vec_obs_from_env(env) -> dict:
@@ -171,6 +171,13 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=0, help="RNG seed for trajectory sampling")
     parser.add_argument(
+        "--max_steps",
+        type=int,
+        default=None,
+        help="Episode step cap (default: CONFIG simulation_setup.max_steps = 350). "
+             "~1.3x the longest expert trajectory is enough to judge reaching.",
+    )
+    parser.add_argument(
         "--renders",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -190,12 +197,6 @@ def main() -> None:
         "--log_file",
         default=None,
         help="Append stdout to this file (default: logs/eval_apple_picking_expert/<ts>_<run_id>.log)",
-    )
-    parser.add_argument(
-        "--use_cached_optical_flow",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="False=live RAFT on sim rgb (matches tree08 v2 training). True=HDF5 optical_flow at BC load only.",
     )
     args = parser.parse_args()
 
@@ -233,11 +234,14 @@ def main() -> None:
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
+    image_channels = checkpoint_image_channels(checkpoint_path)
     training_config = {
         **APPLE_PICKING_CONFIG,
         "simulation_setup": {
             **APPLE_PICKING_CONFIG["simulation_setup"],
+            "image_channels": image_channels,
             "renders": args.renders,
+            **({"max_steps": args.max_steps} if args.max_steps else {}),
             "draw_apple_centroid_markers": not args.renders,
             "draw_trajectory_target_markers": args.renders,
             "terminate_on_self_collision": True,
@@ -259,7 +263,7 @@ def main() -> None:
     print(
         f"[eval:config] checkpoint={checkpoint_path} n_episodes={len(episode_keys)} "
         f"deterministic={args.deterministic} seed={args.seed} "
-        f"use_cached_optical_flow={args.use_cached_optical_flow}",
+        f"image_channels={image_channels}",
         flush=True,
     )
 
@@ -283,11 +287,9 @@ def main() -> None:
         use_awac=False,
         path_trajectories=expert_hdf5,
         algo_size=(224, 224),
-        use_cached_optical_flow=args.use_cached_optical_flow,
         bc_only=False,
         device="cuda",
     )
-    model.policy.use_cached_optical_flow = args.use_cached_optical_flow
     model.policy.set_training_mode(False)
 
     max_steps = int(training_config["simulation_setup"].get("max_steps", 500))

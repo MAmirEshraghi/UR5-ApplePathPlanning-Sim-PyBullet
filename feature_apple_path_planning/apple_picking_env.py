@@ -42,6 +42,7 @@ from pybullet_tree_sim.robot import Robot
 from pybullet_tree_sim.tree import Tree
 
 from .utils_conversions import convert_local_action_to_global, convert_global_action_to_local
+from .obs_spec import IMAGE_KEYS, depth_m_to_mm, image_keys_for_channels
 
 import time
 
@@ -175,10 +176,13 @@ class ApplePickingEnv(gym.Env):
 
         self.config = config
         sim_conf = self.config['simulation_setup']
-        self._draw_apple_centroid_markers = bool(
+        # Debug markers are real visual bodies and would appear in the wrist camera's RGB/depth,
+        # so they are only drawn in GUI mode (never in the DIRECT mode used for data and training).
+        gui = bool(sim_conf['renders'])
+        self._draw_apple_centroid_markers = gui and bool(
             sim_conf.get('draw_apple_centroid_markers', True)
         )
-        self._draw_trajectory_target_markers = bool(
+        self._draw_trajectory_target_markers = gui and bool(
             sim_conf.get('draw_trajectory_target_markers', False)
         )
         self._apple_debug_body_ids = []
@@ -212,18 +216,25 @@ class ApplePickingEnv(gym.Env):
         cam_height = self.camera_sensor.depth_height
         cam_width = self.camera_sensor.depth_width
 
+        # Image keys to emit: all of them when recording expert data (image_channels unset),
+        # only what the policy's channels need when training (keeps rollout buffers small).
+        channels = sim_conf.get('image_channels')
+        self.image_obs_keys = IMAGE_KEYS if channels is None else frozenset(image_keys_for_channels(channels))
+        image_spaces = {
+            "rgb": spaces.Box(low=0, high=255, shape=(3, cam_height, cam_width), dtype=np.uint8),
+            "prev_rgb": spaces.Box(low=0, high=255, shape=(3, cam_height, cam_width), dtype=np.uint8),
+            "depth": spaces.Box(low=0, high=np.iinfo(np.uint16).max, shape=(cam_height, cam_width), dtype=np.uint16),
+            "point_mask": spaces.Box(low=0, high=1, shape=(cam_height, cam_width), dtype=np.uint8),
+        }
         self.observation_space = spaces.Dict({
             "achieved_goal": spaces.Box(low=-5., high=5., shape=(3,), dtype=np.float32),
             "desired_goal": spaces.Box(low=-5., high=5., shape=(3,), dtype=np.float32),
             "achieved_or": spaces.Box(low=-1., high=1., shape=(6,), dtype=np.float32), # 6D orientation
             "joint_angles": spaces.Box(low=-1, high=1, shape=(len(robot_conf['start_joint_angles']) * 2,), dtype=np.float32), # sin/cos encoding
-            "relative_distance": spaces.Box(low=-5., high=5., shape=(3,), dtype=np.float32),
+            "relative_distance": spaces.Box(low=-5., high=5., shape=(3,), dtype=np.float32),  # apple centre in tool frame
+            "pregrasp_in_tool": spaces.Box(low=-5., high=5., shape=(3,), dtype=np.float32),   # reward/success target in tool frame
             "prev_action_achieved": spaces.Box(low=-1., high=1., shape=(6,), dtype=np.float32),
-            "rgb": spaces.Box(low=0, high=255, shape=(3, cam_height, cam_width), dtype=np.uint8),
-            "prev_rgb": spaces.Box(low=0, high=255, shape=(3, cam_height, cam_width), dtype=np.uint8),
-         #   "rgb": spaces.Box(low=0, high=255, shape=(3, cam_height, cam_width), dtype=np.uint8),
-         #   "prev_rgb": spaces.Box(low=0, high=255, shape=(3, cam_height, cam_width), dtype=np.uint8),
-            "point_mask": spaces.Box(low=0., high=1., shape=(cam_height, cam_width), dtype=np.float32),
+            **{k: s for k, s in image_spaces.items() if k in self.image_obs_keys},
         })
 
         # --- Initialize state tracking variables ---
@@ -384,6 +395,7 @@ class ApplePickingEnv(gym.Env):
         self.observation = {}
         self.observation_info = {}
         self.prev_observation_info = {}
+        self._prev_rgb = None  # advanced only by step(), so extra _get_obs() calls cannot shift it
         self.action = np.zeros(self.action_space.shape)
 
     def snapshot_episode_start_dist(self):
@@ -406,7 +418,7 @@ class ApplePickingEnv(gym.Env):
         """Projects the 3D desired_goal onto the 2D image plane to create a mask."""
         height = self.camera_sensor.depth_height
         width = self.camera_sensor.depth_width
-        point_mask = np.zeros((height, width), dtype=np.float32)
+        point_mask = np.zeros((height, width), dtype=np.uint8)
 
         view_matrix_np = np.array(view_matrix).reshape(4, 4, order='F')
         proj_matrix_np = np.array(proj_matrix_tuple).reshape(4, 4, order='F')
@@ -424,7 +436,7 @@ class ApplePickingEnv(gym.Env):
             pixel_y = int(((1 - ndc_pos[1]) / 2) * height)
 
             if 0 <= pixel_x < width and 0 <= pixel_y < height:
-                cv2.circle(point_mask, (pixel_x, pixel_y), radius=15, color=(1.0,), thickness=-1)
+                cv2.circle(point_mask, (pixel_x, pixel_y), radius=15, color=1, thickness=-1)
         elif -1 <= ndc_pos[0] <= 1 and -1 <= ndc_pos[1] <= 1:
             log.debug("Goal projection has invalid depth (ndc_z=%s). Mask will be black.", round(float(ndc_pos[2]), 5))
         else:
@@ -435,8 +447,8 @@ class ApplePickingEnv(gym.Env):
     
     def _get_obs(self):
         """
-        Gathers all sensor data and state information to construct the observation dictionary.
-        This version corrects the handling of previous RGB images to avoid a double-transpose error.
+        Build the observation dict. Calling it more than once without step() returns the same
+        observation: prev_rgb is the image observed before the last step() (= rgb at episode start).
         """
         # 1. Get current robot state and camera info ---
         ee_pos, ee_or_quat = self.robot.get_current_pose(self.robot.tool0_link_idx)
@@ -444,20 +456,14 @@ class ApplePickingEnv(gym.Env):
         joint_angles = self.robot.get_joint_angles()
         view_matrix = self.robot.get_view_mat_at_curr_pose(self.camera_sensor)
 
-        # 2. Handle RGB images correctly ---
-        # Get the NEW RGB image from the camera, which is in (H, W, C) format.
-        # Transpose it to the (C, H, W) format required by the policy.
-        rgb_hwc, _ = self.robot.get_rgbd_at_cur_pose(camera=self.camera_sensor, type="sensor", view_matrix=view_matrix)
-        current_rgb_chw = np.transpose(np.array(rgb_hwc * 255, dtype=np.uint8), (2, 0, 1))
-
-        # Get the PREVIOUS RGB image. It's stored in self.observation['rgb'] from the last step
-        # and is *already* in the correct (C, H, W) format.
-        # If it's the first step, create a zero-array with the correct (C, H, W) shape.
-        cam_height, cam_width = self.camera_sensor.depth_height, self.camera_sensor.depth_width
-        if self.step_counter == 0 or "rgb" not in self.observation:
-            previous_rgb_chw = current_rgb_chw.copy()
-        else:
-            previous_rgb_chw = self.observation["rgb"]
+        # 2. Camera: one render gives RGB (H, W, 3 in [0, 1]) and metric depth (already linearised) ---
+        images = {}
+        if self.image_obs_keys & {"rgb", "prev_rgb", "depth"}:
+            rgb_hwc, depth_m = self.robot.get_rgbd_at_cur_pose(camera=self.camera_sensor, type="sensor", view_matrix=view_matrix)
+            current_rgb_chw = np.transpose(np.array(rgb_hwc * 255, dtype=np.uint8), (2, 0, 1))
+            images["rgb"] = current_rgb_chw
+            images["prev_rgb"] = current_rgb_chw.copy() if self._prev_rgb is None else self._prev_rgb
+            images["depth"] = depth_m_to_mm(depth_m)
 
         # 3. Process other data for reward calculation and observation ---
         # The `prev_observation_info` is needed for calculating rewards based on the previous state.
@@ -476,9 +482,12 @@ class ApplePickingEnv(gym.Env):
         achieved_action_global = np.hstack((ee_vel, ee_ang_vel))
         achieved_action_local = convert_global_action_to_local(self.robot, achieved_action_global)
 
-        # Get goal relative to tool
+        # Apple centre (desired_goal) and pre-grasp target (reward_goal) in the tool frame
         t_tw, r_tw = self.pb_client.invertTransform(ee_pos, ee_or_quat)
         goal_in_tool_frame, _ = self.pb_client.multiplyTransforms(t_tw, r_tw, self.desired_goal, [0, 0, 0, 1])
+        pregrasp_in_tool, _ = self.pb_client.multiplyTransforms(t_tw, r_tw, self.reward_goal, [0, 0, 0, 1])
+        if "point_mask" in self.image_obs_keys:
+            images["point_mask"] = self._compute_deprojected_point_mask(view_matrix, self.camera_sensor.depth_proj_mat)
 
         # 4. Construct the final observation dictionary ---
         self.observation = {
@@ -487,10 +496,9 @@ class ApplePickingEnv(gym.Env):
             'achieved_or': achieved_or_6d,
             'joint_angles': encoded_joint_angles,
             'relative_distance': np.array(goal_in_tool_frame, dtype=np.float32),
+            'pregrasp_in_tool': np.array(pregrasp_in_tool, dtype=np.float32),
             'prev_action_achieved': achieved_action_local.astype(np.float32),
-            'rgb': current_rgb_chw,
-            'prev_rgb': previous_rgb_chw,
-            'point_mask': self._compute_deprojected_point_mask(view_matrix, self.camera_sensor.depth_proj_mat),
+            **{k: v for k, v in images.items() if k in self.image_obs_keys},
         }
         return self.observation
 
@@ -558,7 +566,8 @@ class ApplePickingEnv(gym.Env):
         #  if self.config['simulation_setup']['renders']:
         #      time.sleep(0.005)
 
-        # 3. Get new observation
+        # 3. Get new observation (the image seen before this step becomes prev_rgb)
+        self._prev_rgb = self.observation.get("rgb")
         observation = self._get_obs()
 
         # 4. Compute reward and check for termination
@@ -621,6 +630,7 @@ class ApplePickingEnv(gym.Env):
         for _ in range(self.num_control_simulation_steps):
             self.pb_client.stepSimulation()
 
+        self._prev_rgb = self.observation.get("rgb")
         observation = self._get_obs()
 
         reward, reward_info = self._compute_reward()

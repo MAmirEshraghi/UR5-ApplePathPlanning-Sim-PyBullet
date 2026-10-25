@@ -32,13 +32,13 @@ For every SUCCESS group the script:
        a. si==0 only: teleport to refined_path[0].  For si>0: arm is at
           the actual physics position from the previous step.
        b. q_start  = env.robot.get_joint_angles()  (actual current position).
-       c. obs_before = env._get_obs()
-       d. Compute Jacobian action from actual q_start toward next planned q_tgt.
-       e. env.step(action)  ← REAL action, arm moves continuously through physics.
-       f. obs_after = observation returned by env.step().
-       g. Record (obs_before, action, reward, done, obs_after).
+       c. Compute Jacobian action from actual q_start toward next planned q_tgt.
+       d. env.step(action)  ← REAL action, arm moves continuously through physics.
+       e. Record (action, reward, terminated, truncated) and the returned observation as the
+          next frame. Frame 0 is the bootstrap observation.
   5. Runs a short cartesian goal-correction pass at the end (pure physics).
-  6. Validates and saves to output/agent_data/<run_id>.hdf5.
+  6. Validates and saves to output/agent_data/<out_id>.hdf5 in agent-data schema v2
+     (see feature_apple_path_planning/agent_data.py): every frame stored once.
 
 Why no teleportation between segments?
   Because the RL agent never teleports at inference time.  By generating data
@@ -48,8 +48,8 @@ Why no teleportation between segments?
 
 Run from repository root (venv activated):
 
-    PYTHONPATH=. python feature_apple_path_planning/playground/generate_agent_data_from_waypoints_2.py \\
-        --run-id 20260504_203032
+    python feature_apple_path_planning/generate_agent_data_from_waypoints_2.py \\
+        --run-id tree08 --path-rank 1 --out-id tree08_rank1_v2 --save-only-success
 
 Process only one group:
 
@@ -112,6 +112,8 @@ assert _dg_spec.loader is not None
 _dg_spec.loader.exec_module(dg)
 
 from feature_apple_path_planning.apple_picking_env import ApplePickingEnv
+from feature_apple_path_planning import agent_data  # noqa: E402
+from feature_apple_path_planning.obs_spec import DEPTH_UNITS_PER_M  # noqa: E402
 from utils_conversions import convert_global_action_to_local  # noqa: E402
 
 
@@ -331,36 +333,19 @@ def _hdf5_safe_attr_value(value):
     return str(value)
 
 
-def validate_transition_buffers(buffers: dict, env: ApplePickingEnv) -> tuple[bool, str]:
-    obs = buffers["observations"]
-    nxt = buffers["next_observations"]
-    acts = buffers["actions"]
-    rews = buffers["rewards"]
-    dns = buffers["dones"]
-    if not obs:
-        return False, "observations buffer is empty"
-    n = len(obs)
-    if not (len(nxt) == len(acts) == len(rews) == len(dns) == n):
-        return False, "buffer length mismatch"
-    obs_keys = list(obs[0].keys())
-    act_dim = int(env.action_space.shape[0])
-    for i in range(n):
-        if set(obs[i].keys()) != set(obs_keys) or set(nxt[i].keys()) != set(obs_keys):
-            return False, f"inconsistent observation keys at step {i}"
-        for k in obs_keys:
-            if not (
-                _is_finite_array(np.asarray(obs[i][k]))
-                and _is_finite_array(np.asarray(nxt[i][k]))
-            ):
-                return False, f"non-finite observation at step {i}, key={k}"
-        act = np.asarray(acts[i], dtype=np.float64).reshape(-1)
-        if act.shape[0] != act_dim:
-            return False, f"action dim mismatch at step {i}: got {act.shape[0]}, expected {act_dim}"
-        if not _is_finite_array(act):
-            return False, f"non-finite action at step {i}"
-        if not np.isfinite(float(rews[i])):
-            return False, f"non-finite reward at step {i}"
-    return True, "ok"
+def capture_attrs(env: ApplePickingEnv) -> dict:
+    """Sensor / render settings stored with every trajectory so consumers can check they match."""
+    cam = env.camera_sensor
+    return {
+        "render_mode": "GUI" if env.pbutils.renders else "DIRECT",
+        "camera_width": int(cam.depth_width),
+        "camera_height": int(cam.depth_height),
+        "camera_vfov_deg": float(cam.depth_vfov),
+        "camera_near_m": float(cam.near_val),
+        "camera_far_m": float(cam.far_val),
+        "depth_units_per_m": float(DEPTH_UNITS_PER_M),
+        "control_time": float(env.control_time),
+    }
 
 
 def verify_agent_hdf5(path: Path) -> None:
@@ -373,15 +358,17 @@ def verify_agent_hdf5(path: Path) -> None:
         if not keys:
             return
         first = f[keys[0]]
-        obs_shapes = {k: tuple(first["observations"][k].shape) for k in first["observations"].keys()}
+        agent_data.check_schema(first)
+        frame_shapes = {k: tuple(d.shape) for k, d in first["frames"].items()}
         log.info(
-            "[verify] first_group=%s  actions=%s  rewards=%s  dones=%s",
+            "[verify] first_group=%s  schema=v%s  actions=%s  rewards=%s  terminals=%s",
             keys[0],
+            int(first.attrs["schema_version"]),
             tuple(first["actions"].shape),
             tuple(first["rewards"].shape),
-            tuple(first["dones"].shape),
+            tuple(first["terminals"].shape),
         )
-        log.info("[verify] observation_shapes=%s", obs_shapes)
+        log.info("[verify] frame_shapes=%s", frame_shapes)
 
 
 def print_terminal_run_report(rows: list[dict]) -> None:
@@ -629,7 +616,6 @@ def run_group(
     group_key: str,
     metadata: dict,
     refined_path: list,
-    optical_flow_model,
     agent_data_path: Path,
     args: argparse.Namespace,
     control_freq: float,
@@ -644,10 +630,9 @@ def run_group(
 
     Each segment:
         1. q_start = actual current joint angles  (or refined_path[0] for si==0)
-        2. obs_before = env._get_obs()
-        3. Compute Jacobian action from actual q_start toward next planned q_tgt
-        4. obs_after, reward, done = env.step(action)  ← REAL action, real physics
-        5. Record (obs_before, action, reward, done, obs_after)
+        2. Compute Jacobian action from actual q_start toward next planned q_tgt
+        3. obs, reward, terminated, truncated = env.step(action)  ← REAL action, real physics
+        4. Record the step and append obs as the next frame
 
     No teleportation between segments means the transitions chain continuously,
     exactly as the RL agent will experience at inference time.
@@ -665,19 +650,38 @@ def run_group(
         group_key, len(refined_path), num_segments,
     )
 
+    # frames has one more entry than the per-step lists: frames[t] -> actions[t] -> frames[t+1]
     buffers: dict = {
-        "observations": [],
-        "next_observations": [],
+        "frames": [],
         "actions": [],
         "rewards": [],
-        "dones": [],
+        "dones": [],        # generator episode end (goal reached within --final-goal-pos-tol)
+        "terminals": [],    # env `terminated`
+        "truncateds": [],   # env `truncated`
+        "step_info": {k: [] for k in agent_data.STEP_INFO_KEYS},
         "goal_achieved_count": 0,
         "truncated_flag": False,
     }
     final_correction_note = "not_run"
 
-    # Bootstrap: reset env, set apple target, teleport arm to path start
-    bootstrap_rollout(env, metadata, refined_path)
+    def _record(obs_after, action, reward, terminated_, truncated_, info_) -> None:
+        buffers["frames"].append(obs_after)
+        buffers["actions"].append(np.asarray(action, dtype=np.float32))
+        buffers["rewards"].append(float(reward))
+        buffers["dones"].append(bool(terminated_ or truncated_))
+        buffers["terminals"].append(bool(terminated_))
+        buffers["truncateds"].append(bool(truncated_))
+        for k in agent_data.STEP_INFO_KEYS:
+            buffers["step_info"][k].append(info_[k])
+
+    def _drop_last_step() -> None:
+        for buf in ("frames", "actions", "rewards", "dones", "terminals", "truncateds"):
+            buffers[buf].pop()
+        for v in buffers["step_info"].values():
+            v.pop()
+
+    # Bootstrap: reset env, set apple target, teleport arm to path start; frame 0 = start observation
+    buffers["frames"].append(bootstrap_rollout(env, metadata, refined_path))
 
 
     alpha = float(np.clip(args.action_smoothing_alpha, 0.0, 1.0))
@@ -704,11 +708,9 @@ def run_group(
     #      NO teleport.  This is the key fix: data is generated the same way
     #      the RL agent will run at inference, so replay matches generation.
     #   2. q_start = actual current joint angles (physics position, not planned).
-    #   3. obs_before = env._get_obs()   (sets prev_obs_info = current EE pos)
-    #   4. Jacobian action from actual q_start toward next planned q_tgt.
-    #   5. env.step(action) — arm moves continuously through physics.
-    #   6. obs_after = observation from env.step() (actual physics result).
-    #   7. Record (obs_before, action, reward, done, obs_after).
+    #   3. Jacobian action from actual q_start toward next planned q_tgt.
+    #   4. env.step(action) — arm moves continuously through physics.
+    #   5. Record the step; the returned observation becomes the next frame.
     #
     # Because the arm never teleports between steps, chaining all stored
     # (obs, action, next_obs) triples in replay reproduces the exact same
@@ -747,10 +749,8 @@ def run_group(
             buffers["dones"][-1] = True
             break
 
-        # Step 2 — observation at current state
-        # (sets env.prev_observation_info[achieved_pos] = current EE pos)
-        obs_before = env._get_obs()
-        obs_before = dg.ensure_optical_flow(obs_before, optical_flow_model)
+        # Step 2 — the observation at the current state is buffers["frames"][-1]
+        # (bootstrap obs or the previous env.step result; the arm has not moved since).
 
         # Step 3 — Jacobian action from actual current position toward next waypoint.
         # compute_action calls env.robot.calculate_jacobian() which uses the live
@@ -765,21 +765,12 @@ def run_group(
         # No teleportation. The arm moves from its current position through the
         # full DLS Jacobian → joint-velocity → PyBullet physics pipeline.
         # Replaying this action at inference will produce the same transition.
-        obs_after_raw, reward, terminated, truncated, info = env.step(
+        obs_after, reward, terminated, truncated, info = env.step(
             action_applied.astype(np.float64)
         )
 
-        # Step 5 — observation from the physics result (actual position, no reset)
-        obs_after = dg.ensure_optical_flow(obs_after_raw, optical_flow_model)
-
-        done_flag = bool(terminated or truncated)
-
-        # Record transition
-        buffers["observations"].append(obs_before)
-        buffers["next_observations"].append(obs_after)
-        buffers["actions"].append(np.asarray(action_applied, dtype=np.float32))
-        buffers["rewards"].append(float(reward))
-        buffers["dones"].append(done_flag)
+        # Step 5 — record (frame_t, action, reward, frame_t+1)
+        _record(obs_after, action_applied, reward, terminated, truncated, info)
         if bool(info.get("goal_achieved", False)):
             buffers["goal_achieved_count"] += 1
         if truncated:
@@ -901,14 +892,8 @@ def run_group(
                         corr_transitions_added,
                     )
                     for _ in range(corr_transitions_added):
-                        for buf in ("observations", "next_observations", "actions",
-                                    "rewards", "dones"):
-                            if buffers[buf]:
-                                buffers[buf].pop()
+                        _drop_last_step()
                     break
-
-                obs_before_corr = env._get_obs()
-                obs_before_corr = dg.ensure_optical_flow(obs_before_corr, optical_flow_model)
 
                 ee_vel_global = np.zeros(6, dtype=np.float64)
                 error_vec = goal_pos - ee_pos
@@ -929,14 +914,8 @@ def run_group(
                 obs_after_corr, reward, terminated, truncated, info = env.step(
                     action_corr.astype(np.float64)
                 )
-                obs_after_corr = dg.ensure_optical_flow(obs_after_corr, optical_flow_model)
                 done_flag = bool(terminated or truncated)
-
-                buffers["observations"].append(obs_before_corr)
-                buffers["next_observations"].append(obs_after_corr)
-                buffers["actions"].append(np.asarray(action_corr, dtype=np.float32))
-                buffers["rewards"].append(float(reward))
-                buffers["dones"].append(done_flag)
+                _record(obs_after_corr, action_corr, reward, terminated, truncated, info)
                 corr_transitions_added += 1
                 if bool(info.get("goal_achieved", False)):
                     buffers["goal_achieved_count"] += 1
@@ -976,16 +955,16 @@ def run_group(
         final_correction_note = "skipped(episode_terminated_or_truncated)"
 
     # ── quality gates ─────────────────────────────────────────────────────────
-    success = bool(buffers["dones"] and buffers["dones"][-1])
+    # Episode end counts as success only if it reached the goal: a collision also ends the episode.
+    success = bool(buffers["dones"] and buffers["dones"][-1]) and not any(
+        buffers["step_info"]["collisions_unacceptable"]
+    )
     n_tr = len(buffers["actions"])
     reward_np_gate = (
         np.asarray(buffers["rewards"], dtype=np.float64) if n_tr else np.array([])
     )
     count_vis_gate = int(
-        sum(
-            1 for o in buffers["next_observations"]
-            if "point_mask" in o and np.any(o["point_mask"] > 0)
-        )
+        sum(1 for o in buffers["frames"][1:] if np.any(o["point_mask"] > 0))
     ) if n_tr else 0
     vis_frac_gate = count_vis_gate / n_tr if n_tr else None
 
@@ -993,20 +972,6 @@ def run_group(
         log.warning("skip save  key=%s  reason=truncated", group_key)
         return _summary(
             "skipped:truncated",
-            correction_outcome=final_correction_note,
-            success=success,
-            transitions=n_tr,
-            r_min=float(np.min(reward_np_gate)) if n_tr else None,
-            r_mean=float(np.mean(reward_np_gate)) if n_tr else None,
-            goal_achieved_count=int(buffers["goal_achieved_count"]),
-            visibility_frac=vis_frac_gate,
-        )
-
-    valid, reason = validate_transition_buffers(buffers, env)
-    if not valid:
-        log.error("skip save  key=%s  invalid_buffers(%s)", group_key, reason)
-        return _summary(
-            f"skipped:invalid_buffers({reason})",
             correction_outcome=final_correction_note,
             success=success,
             transitions=n_tr,
@@ -1030,12 +995,7 @@ def run_group(
         )
 
     n_transitions = len(buffers["actions"])
-    count_in_frame = int(
-        sum(
-            1 for o in buffers["next_observations"]
-            if "point_mask" in o and np.any(o["point_mask"] > 0)
-        )
-    )
+    count_in_frame = count_vis_gate
     visibility_frac = count_in_frame / n_transitions if n_transitions > 0 else 0.0
     min_vis = float(args.min_visibility)
     if min_vis > 0.0 and visibility_frac < min_vis:
@@ -1063,9 +1023,8 @@ def run_group(
         "goal_achieved_count": int(buffers["goal_achieved_count"]),
         "truncated_flag": bool(buffers["truncated_flag"]),
     }
-    enc = np.asarray(buffers["observations"][0]["joint_angles"], dtype=np.float64).reshape(-1)
-    half = len(enc) // 2
-    save_info["initial_joint_angles"] = np.arctan2(enc[:half], enc[half:]).astype(np.float64)
+    # exact joint angles of frame 0 (bootstrap teleport target), so replay starts from the same state
+    save_info["initial_joint_angles"] = np.asarray(refined_path[0], dtype=np.float64)
 
     tree_info = {k: _hdf5_safe_attr_value(v) for k, v in metadata.items()}
 
@@ -1076,18 +1035,23 @@ def run_group(
     ).as_quat()
 
     try:
-        dg.save_agent_data_to_hdf5(
-            buffers["observations"],
-            buffers["actions"],
-            buffers["rewards"],
-            buffers["dones"],
-            buffers["next_observations"],
-            save_info,
-            success,
-            tree_info,
-            robot_pos_save,
-            robot_or_save,
+        agent_data.write_trajectory(
             str(agent_data_path),
+            str(group_key),
+            frames=buffers["frames"],
+            actions=buffers["actions"],
+            rewards=buffers["rewards"],
+            terminals=buffers["terminals"],
+            truncateds=buffers["truncateds"],
+            step_info=buffers["step_info"],
+            attrs={
+                **tree_info,
+                **save_info,
+                **capture_attrs(env),
+                "robot_pos": robot_pos_save,
+                "robot_or": robot_or_save,
+                "success": success,
+            },
         )
     except Exception as exc:
         log.error("save error  key=%s  err=%s", group_key, exc, exc_info=True)
@@ -1178,8 +1142,21 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
-        "--optical-flow", action="store_true",
-        help="Compute RAFT optical flow each step (default: off → zero-flow arrays).",
+        "--path-rank", type=int, default=0,
+        help="Only process waypoint groups with this planner path_rank (e.g. 1 = best path per apple; 0 = all).",
+    )
+    p.add_argument(
+        "--out-id", default=None,
+        help="Output stem under output/agent_data/ (default: --run-id).",
+    )
+    p.add_argument(
+        "--overwrite", action="store_true",
+        help="Replace an existing output file (otherwise refuse, to avoid duplicated trajectories).",
+    )
+    p.add_argument(
+        "--renders", action=argparse.BooleanOptionalAction, default=False,
+        help="PyBullet GUI, for inspection only. Default off: DIRECT mode uses the same renderer as "
+             "training/eval and draws no debug markers, so recorded images match what the policy sees.",
     )
     p.add_argument(
         "--verify-hdf5", action="store_true",
@@ -1249,7 +1226,7 @@ def main() -> None:
 
     waypoints_dir, agent_data_dir, _ = dg._ensure_output_dirs()
     run_id, waypoints_path = dg._resolve_run_id(args.run_id, waypoints_dir, should_exist=True)
-    agent_data_path = (agent_data_dir / f"{run_id}.hdf5").resolve()
+    agent_data_path = (agent_data_dir / f"{args.out_id or run_id}.hdf5").resolve()
 
     log.info(
         "run_id=%s  waypoints=%s  agent_data=%s",
@@ -1268,12 +1245,20 @@ def main() -> None:
         verify_agent_hdf5(agent_data_path)
         return
 
+    if agent_data_path.exists():
+        if not args.overwrite:
+            log.error("Output %s exists; pass --overwrite to replace it.", agent_data_path)
+            return
+        agent_data_path.unlink()
+        log.warning("Removed existing output %s (--overwrite).", agent_data_path)
+
     # ── collect SUCCESS group keys ────────────────────────────────────────────
     with h5py.File(waypoints_path, "r") as f:
         all_keys = sort_group_keys(list(f.keys()))
         success_keys = [
             k for k in all_keys
             if int(f[k].attrs.get("fail_mode", -1)) == dg.ResultMode.SUCCESS.value
+            and (args.path_rank <= 0 or int(f[k].attrs.get("path_rank", 1)) == args.path_rank)
         ]
 
     if not success_keys:
@@ -1305,17 +1290,9 @@ def main() -> None:
         args.save_only_success, args.min_visibility,
     )
 
-    # ── optical flow ──────────────────────────────────────────────────────────
-    optical_flow_model = None
-    if args.optical_flow:
-        try:
-            optical_flow_model = dg.OpticalFlow(size=dg.DEFAULT_OPTICAL_FLOW_SIZE)
-            log.info("Optical flow model loaded.")
-        except Exception as exc:
-            log.error("Optical flow init failed: %s — using zeros.", exc)
-
     # ── build env once ────────────────────────────────────────────────────────
-    dg.CONFIG["simulation_setup"]["draw_apple_centroid_markers"] = True
+    dg.CONFIG["simulation_setup"]["renders"] = bool(args.renders)
+    dg.CONFIG["simulation_setup"]["draw_apple_centroid_markers"] = True  # env draws them only in GUI
     env = ApplePickingEnv(config=dg.CONFIG)
     if bool(env.robot.robot_conf.get("disable_self_collisions", False)):
         log.warning(
@@ -1406,7 +1383,6 @@ def main() -> None:
                 group_key=group_key,
                 metadata=metadata,
                 refined_path=refined_path,
-                optical_flow_model=optical_flow_model,
                 agent_data_path=agent_data_path,
                 args=args,
                 control_freq=control_freq,

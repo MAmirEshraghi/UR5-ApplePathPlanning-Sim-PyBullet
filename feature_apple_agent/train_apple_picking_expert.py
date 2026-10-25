@@ -21,6 +21,8 @@ if _AGENT_DIR not in sys.path:
 
 # --- Imports from Apple Picking Project ---
 from feature_apple_path_planning.apple_picking_env import ApplePickingEnv
+from feature_apple_path_planning import agent_data
+from feature_apple_path_planning.obs_spec import parse_image_channels
 from feature_apple_path_planning.run_apple_data_generator import (
     CONFIG as APPLE_PICKING_CONFIG,
     apply_tree_setup_from_waypoints_hdf5,
@@ -294,11 +296,7 @@ def _log_train_config(
         f"({'final only' if ckpt_freq is None else f'save every {ckpt_freq} steps'})",
         flush=True,
     )
-    print(
-        f"[train:config] use_cached_optical_flow={args.use_cached_optical_flow} "
-        f"({'HDF5 saved flow' if args.use_cached_optical_flow else 'live RAFT on rgb — aligned with eval/PPO'})",
-        flush=True,
-    )
+    print(f"[train:config] image_channels={policy_kwargs['image_channels'] or '() proprio-only'}", flush=True)
 
 
 class BcWarmupCallback(BaseCallback):
@@ -530,22 +528,7 @@ class ApplePickingImitationCallback(BaseCallback):
             with h5py.File(self.hdf5_path, 'r') as f:
                 self.trajectory_keys = list(f.keys())
                 for key in self.trajectory_keys:
-                    grp = f[key]
-                    meta = {attr: grp.attrs[attr] for attr in grp.attrs.keys()}
-                    if (
-                        "initial_joint_angles" not in meta
-                        and "observations" in grp
-                        and "joint_angles" in grp["observations"]
-                    ):
-                        enc = np.asarray(
-                            grp["observations"]["joint_angles"][0],
-                            dtype=np.float64,
-                        ).reshape(-1)
-                        half = len(enc) // 2
-                        meta["initial_joint_angles"] = np.arctan2(
-                            enc[:half], enc[half:]
-                        ).astype(np.float64)
-                    self.metadata_cache[key] = meta
+                    self.metadata_cache[key] = agent_data.trajectory_metadata(f[key])
             if self.verbose > 0:
                 print(
                     f"[train:init] callback ready expert_trajectories={len(self.trajectory_keys)}",
@@ -718,10 +701,10 @@ if __name__ == "__main__":
         help="Expert BC only: no sim rollouts, no PPO backward (use_online_bc still loads expert HDF5).",
     )
     parser.add_argument(
-        "--use_cached_optical_flow",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="BC vision: True=read optical_flow from HDF5; False=live RAFT on rgb/prev_rgb (matches eval/PPO).",
+        "--image_channels",
+        default="depth,mask",
+        help="Policy image inputs, comma-separated from {flow, depth, mask}; 'none' = proprio only "
+             "(default: depth,mask). Must match the checkpoint when resuming.",
     )
     parser.add_argument(
         "--renders",
@@ -766,10 +749,12 @@ if __name__ == "__main__":
         total_timesteps = args.total_timesteps
         expert_data_filepath = str(expert_data_path.resolve())
 
+        image_channels = parse_image_channels(args.image_channels)
         training_config = {
             **APPLE_PICKING_CONFIG,
             "simulation_setup": {
                 **APPLE_PICKING_CONFIG["simulation_setup"],
+                "image_channels": image_channels,  # env emits only the image keys these need
                 "renders": args.renders,
                 "draw_apple_centroid_markers": True,
                 "terminate_on_self_collision": True,  # was False — align with expert data gen default
@@ -828,12 +813,12 @@ if __name__ == "__main__":
         # --- Policy and Model Setup ---
         policy_kwargs = {
             'features_extractor_class': Encoder,
-            'features_extractor_kwargs': dict(in_channels=3, size=(240, 424)), # Match env camera
+            'features_extractor_kwargs': dict(size=(240, 424)),  # in_channels derived from image_channels
             'net_arch': dict(pi=[128], vf=[128]),  # Reduce from 64 to 32 (50% less memory)
             'activation_fn': th.nn.ReLU,
             'lstm_hidden_size': 128,  # Reduce from 256 to 128 (50% less memory)
             'enable_critic_lstm': True,
-            'use_optical_flow': True, # Apple picking env doesn't use optical flow
+            'image_channels': image_channels,
             'squash_output': True,  # Force actions to be in [-1, 1] range using tanh
             'log_std_init': -1.5,  # was 0.0 (std≈1.0) — closer to expert Jacobian action scale
         }
@@ -865,7 +850,6 @@ if __name__ == "__main__":
             use_awac=False,
             path_trajectories=expert_path,
             algo_size=(224, 224),
-            use_cached_optical_flow=args.use_cached_optical_flow,
             bc_only=args.bc_only,
             device="cuda",
         )
@@ -889,7 +873,7 @@ if __name__ == "__main__":
                 f"[train:config] resumed bc_only={model.bc_only} "
                 f"collect_online_data={model.collect_online_data} "
                 f"expert_bc_hdf5={model.path_trajectories} "
-                f"use_cached_optical_flow={model.use_cached_optical_flow} "
+                f"image_channels={model.policy.image_channels} "
                 f"num_timesteps={model.num_timesteps}",
                 flush=True,
             )
@@ -912,7 +896,6 @@ if __name__ == "__main__":
                 path_trajectories=expert_path,
                 bc_coeff=args.bc_coeff_warmup,  # #tier1-30k: warmup starts high; callback holds until bc_warmup_steps
                 algo_size=(224, 224),
-                use_cached_optical_flow=args.use_cached_optical_flow,
                 policy_kwargs=policy_kwargs,
                 verbose=1,
                 tensorboard_log=f"./runs/{run_name}",
@@ -921,7 +904,6 @@ if __name__ == "__main__":
             )
             model.ent_coef = args.ent_coef_warmup
 
-        model.policy.use_cached_optical_flow = model.use_cached_optical_flow
         model.set_logger(new_logger)
         if args.memory_debug:
             log_memory("after_model")
@@ -963,27 +945,10 @@ if __name__ == "__main__":
         save_dir = Path("./logs") / run_name
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        # Store original dataloader and data_iter references
-        original_dataloader = getattr(model, "dataloader", None)
-        original_data_iter = getattr(model, "data_iter", None)
-        
-        # Clear unpicklable objects before saving
-        if original_dataloader is not None:
-            model.dataloader = None
-        if original_data_iter is not None:
-            model.data_iter = None
-
-        try:
-            model.save(str(save_dir / "final_model.zip"))
-            print("INFO: Training complete. Final model saved.")
-        except NotImplementedError as exc:
-            print(f"WARNING: Failed to save model due to unpicklable object: {exc}")
-        finally:
-            # Restore original references after saving
-            if original_dataloader is not None:
-                model.dataloader = original_dataloader
-            if original_data_iter is not None:
-                model.data_iter = original_data_iter
+        # Same exclusions as periodic checkpoints: pickling the rollout/expert buffers (GBs of images)
+        # made final_model.zip ~0.6 GB and got the process OOM-killed mid-save on flow runs.
+        model.save(str(save_dir / "final_model.zip"), exclude=PruningCheckpointCallback._SAVE_EXCLUDE)
+        print("INFO: Training complete. Final model saved.")
 
     except BaseException:
         traceback.print_exc(file=sys.stderr)

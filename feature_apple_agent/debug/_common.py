@@ -23,8 +23,10 @@ from apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAEWith
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv
 
+from feature_apple_path_planning import agent_data
 from eval_apple_picking_expert import (
     _load_expert_metadata,
+    checkpoint_image_channels,
     _reconfigure_to_trajectory,
     _vec_obs_from_env,
 )
@@ -39,20 +41,22 @@ TABULAR_OBS_KEYS = (
     "desired_goal",
     "joint_angles",
     "relative_distance",
+    "pregrasp_in_tool",
     "prev_action_achieved",
 )
-IMAGE_OBS_KEYS = ("rgb", "prev_rgb", "point_mask")
+IMAGE_OBS_KEYS = ("rgb", "prev_rgb", "depth", "point_mask")
 
 
 def agent_data_path(run_id: str) -> Path:
     return Path("output") / "agent_data" / f"{run_id}.hdf5"
 
 
-def training_config(renders: bool = False) -> dict:
+def training_config(renders: bool = False, image_channels=None) -> dict:
     return {
         **APPLE_PICKING_CONFIG,
         "simulation_setup": {
             **APPLE_PICKING_CONFIG["simulation_setup"],
+            "image_channels": image_channels,  # None = emit every image key
             "renders": renders,
             "draw_apple_centroid_markers": False,
             "draw_trajectory_target_markers": False,
@@ -68,9 +72,11 @@ def sample_episode_keys(run_id: str, n_episodes: int, seed: int) -> Tuple[List[s
     return keys, metadata_cache
 
 
-def setup_env(run_id: str, renders: bool = False):
+def setup_env(run_id: str, renders: bool = False, checkpoint: str = None):
+    """Env emitting the checkpoint's image keys (all keys when no checkpoint is given)."""
     path = agent_data_path(run_id)
-    cfg = training_config(renders=renders)
+    channels = checkpoint_image_channels(Path(checkpoint).resolve()) if checkpoint else None
+    cfg = training_config(renders=renders, image_channels=channels)
     _apply_tree_setup_for_training(cfg, run_id, path)
     _log_train_data(path, cfg)
     env = make_vec_env(
@@ -124,7 +130,6 @@ def load_policy(
     env,
     hdf5_path: Path,
     *,
-    use_cached_optical_flow: bool = False,
     device: str = "auto",
 ):
     if device in ("cuda", "cpu"):
@@ -142,18 +147,15 @@ def load_policy(
         use_awac=False,
         path_trajectories=str(hdf5_path.resolve()),
         algo_size=(224, 224),
-        use_cached_optical_flow=use_cached_optical_flow,
         bc_only=False,
         device=resolved,
     )
 
 
 def hdf5_obs_step0(h5file: h5py.File, traj_key: str) -> Dict[str, np.ndarray]:
-    obs = {}
-    grp = h5file[traj_key]["observations"]
-    for key in grp.keys():
-        obs[key] = np.asarray(grp[key][0])
-    return obs
+    grp = h5file[traj_key]
+    frames = agent_data.load_frames(grp, agent_data.frame_keys(grp))
+    return {k: v[0] for k, v in frames.items()}
 
 
 def vec_obs_from_dict(obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
@@ -161,23 +163,11 @@ def vec_obs_from_dict(obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
 
 
 def hdf5_obs_for_policy(model, raw_obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
-    """Stack HDF5 t=0 obs with keys matching policy obs space (expert space when cached flow)."""
-    if getattr(model, "use_cached_optical_flow", False):
-        keys = model.observation_space_expert.spaces.keys()
-    else:
-        keys = model.observation_space.spaces.keys()
-    return {k: np.stack([np.asarray(raw_obs[k])]) for k in keys if k in raw_obs}
+    """Stack HDF5 t=0 obs with the keys of the policy's observation space."""
+    return {k: np.stack([np.asarray(raw_obs[k])]) for k in model.observation_space.spaces.keys()}
 
 
 def predict_policy(model, obs: Dict[str, np.ndarray], **kwargs):
-    """model.predict that uses observation_space_expert when use_cached_optical_flow."""
-    if getattr(model, "use_cached_optical_flow", False):
-        old_space = model.policy.observation_space
-        model.policy.observation_space = model.observation_space_expert
-        try:
-            return model.predict(obs, **kwargs)
-        finally:
-            model.policy.observation_space = old_space
     return model.predict(obs, **kwargs)
 
 

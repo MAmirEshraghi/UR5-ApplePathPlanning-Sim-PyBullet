@@ -206,15 +206,14 @@ def run_diagnostic(args, resolved_device: str) -> None:
             n_episodes=args.n_episodes,
             seed=args.seed,
         )
-        env, cfg, hdf5_path = setup_env(args.run_id)
+        env, cfg, hdf5_path = setup_env(args.run_id, checkpoint=args.checkpoint)
         max_steps = int(cfg["simulation_setup"].get("max_steps", 500))
         ckpt = Path(args.checkpoint).resolve()
-        cached_flow = args.use_cached_optical_flow
         print(
             f"[diag:multistep:config] checkpoint={ckpt} n={len(episode_keys)} "
             f"max_steps={max_steps} max_log_steps={args.max_log_steps} "
             f"l2_threshold={args.l2_threshold} deterministic={args.deterministic} "
-            f"device={resolved_device} use_cached_optical_flow={cached_flow}",
+            f"device={resolved_device}",
             flush=True,
         )
 
@@ -222,10 +221,8 @@ def run_diagnostic(args, resolved_device: str) -> None:
             str(ckpt),
             env,
             hdf5_path,
-            use_cached_optical_flow=cached_flow,
             device=resolved_device,
         )
-        model.policy.use_cached_optical_flow = cached_flow
         model.policy.set_training_mode(False)
 
         episodes: List[dict] = []
@@ -263,7 +260,6 @@ def run_diagnostic(args, resolved_device: str) -> None:
                 "l2_threshold": args.l2_threshold,
                 "deterministic": args.deterministic,
                 "device": resolved_device,
-                "use_cached_optical_flow": cached_flow,
             },
             "summary": agg,
             "episodes": episodes,

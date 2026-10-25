@@ -47,9 +47,13 @@ class OpticalFlow:
             self.shared_dict[pid] = optical_flow.cpu().numpy()[0]
 
     def _preprocess(self, img1, img2):
+        # RAFT's transforms rescale only uint8 to [0, 1]; a float image in [0, 255] passes through
+        # unscaled and yields garbage flow, so require uint8 (what the env emits).
+        if img1.dtype != th.uint8 or img2.dtype != th.uint8:
+            raise TypeError(f"OpticalFlow expects uint8 images, got {img1.dtype} / {img2.dtype}")
         img1 = F.resize(img1, size=self.size, antialias=False)
         img2 = F.resize(img2, size=self.size, antialias=False)
-        return self.transforms(img1, img2)  # scaling and resize?
+        return self.transforms(img1, img2)  # uint8 -> [-1, 1] float
 
     def calculate_optical_flow(self, current_rgb, previous_rgb):
         # convert to np array

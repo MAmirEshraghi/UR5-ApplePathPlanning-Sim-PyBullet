@@ -84,9 +84,7 @@ from enum import Enum
 from dataclasses import dataclass, field
 
 import copy
-import torch as th
 
-from feature_apple_agent.apple_picking_sb3.pruning_gym.optical_flow import OpticalFlow
 
 try:
     from pybullet_tree_sim.utils.pyb_utils import PyBUtils
@@ -234,8 +232,6 @@ CONFIG = {
     }
 }
 
-DEFAULT_OPTICAL_FLOW_SIZE = (224, 224)
-
 
 @dataclass
 class PlannerStats:
@@ -306,38 +302,6 @@ class PlannerStats:
         return lines
 
 
-def ensure_optical_flow(obs: dict,
-                        optical_flow_model: OpticalFlow = None,
-                        default_size: tuple = DEFAULT_OPTICAL_FLOW_SIZE) -> dict:
-    """
-    Ensure that each observation dictionary carries an 'optical_flow' entry so it
-    can be saved for expert training. If an optical flow model is provided we run
-    it, otherwise we fall back to zeros so downstream code still finds the key.
-    """
-    if obs is None:
-        return None
-
-    if obs.get('optical_flow') is not None:
-        return obs
-
-    target_size = getattr(optical_flow_model, "size", default_size)
-    zero_flow = np.zeros((2, target_size[0], target_size[1]), dtype=np.float32)
-
-    if optical_flow_model is None:
-        obs['optical_flow'] = zero_flow
-        return obs
-
-    try:
-        current_rgb = th.tensor(obs['rgb'], dtype=th.float32)
-        prev_rgb = th.tensor(obs['prev_rgb'], dtype=th.float32)
-        flow_tensor = optical_flow_model.calculate_optical_flow(current_rgb, prev_rgb)
-        obs['optical_flow'] = flow_tensor.squeeze(0).cpu().numpy().astype(np.float32)
-    except Exception as exc:
-        log.error(f"Failed to compute optical flow for observation: {exc}", exc_info=True)
-        obs['optical_flow'] = zero_flow
-
-    return obs
-
 
 def seed_random_generators(seed_value, label="global"):
     if seed_value is None:
@@ -384,7 +348,16 @@ def generate_apple_orientation_quat(apple_center_pos: np.ndarray,
     final_orientation = base_orientation * perturb_rot
     return final_orientation.as_quat()
 
-def get_ik_solutions_for_apple(robot: Robot, 
+def pregrasp_from_apple(apple_center: np.ndarray, approach_orn_quat, offset_dist: float) -> np.ndarray:
+    """Target contract: pre-grasp = apple centre backed off along the tool z (approach) axis.
+
+    Source-agnostic: apple_center may come from the sim mesh or from perception (detection + depth).
+    """
+    approach_axis = Rotation.from_quat(approach_orn_quat).as_matrix()[:, 2]
+    return np.asarray(apple_center, dtype=np.float64) - offset_dist * approach_axis
+
+
+def get_ik_solutions_for_apple(robot: Robot,
                                is_state_valid_fn, 
                                apple_center: np.ndarray, robot_ref_pos_for_orient: np.ndarray,
                                config_planning: dict, 
@@ -406,9 +379,7 @@ def get_ik_solutions_for_apple(robot: Robot,
                                                           max_pitch_yaw, 
                                                           approach_axis_world=np.array([0., 1., 0.]))
         
-        rot_matrix_for_offset = Rotation.from_quat(target_orn_quat).as_matrix()
-        eef_z_axis_world = rot_matrix_for_offset[:, 2]
-        goal_pos_for_ik = np.array(apple_center) - offset_dist * eef_z_axis_world
+        goal_pos_for_ik = pregrasp_from_apple(apple_center, target_orn_quat, offset_dist)
         if CONFIG['visualization']['draw_goal_frames'] and attempt_idx < 40:
             draw_debug_frame(pb_client, goal_pos_for_ik, target_orn_quat, length=CONFIG['visualization']['goal_frame_length'])
         q_goal_candidate_tuple = robot.calculate_ik(goal_pos_for_ik, target_orn_quat)
@@ -779,302 +750,6 @@ def shortcut_and_refine_path(robot, path, extend_fn, collision_fn, task_threshol
     
     return path
 
-def convert_ja_to_ee_vel(robot, path, control_freq=2, max_ee_vel=0.7):
-    ee_vel_actions = []
-    if len(path) < 2: 
-        log.warning("Cannot convert path to velocities: path length is less than 2.")
-        return []
-
-    log.info(f"Converting {len(path)} waypoints to EE velocity actions...")
-    for i in range(len(path) - 1):
-        # Calculate required joint velocities
-
-        joint_velocities = (np.array(path[i + 1]) - np.array(path[i])) * control_freq
-        log.debug(f"control frequency: {control_freq}")
-        #log.debug(f"Step {i}: {np.array(path[i + 1])} - {np.array(path[i])}  = Joint velocities =  {np.round(joint_velocities, 3)}")
-
-        # Set robot to the current waypoint to calculate Jacobian from the correct pose
-        robot.set_joint_angles_no_collision(path[i])
-        time.sleep(0.02)
-        
-        robot.pbclient.stepSimulation()
-        time.sleep(0.1)
-
-        jacobian = robot.calculate_jacobian()
-        
-        # Convert joint velocities to global EE velocity
-        #global_ee_vel = np.dot(jacobian, joint_velocities)
-        global_ee_vel = np.matmul(jacobian, joint_velocities)
-
-   #     log.debug(f"Step {i}: Global EE velocity: {np.round(global_ee_vel, 3)}")
-        
-        # Convert global EE velocity to the gripper's local frame
-        local_ee_vel = convert_global_action_to_local(robot, global_ee_vel)
-    #    log.debug(f"Step {i}: Local EE velocity (action)      : {np.round(local_ee_vel, 3)}")
-                
-        global_ee_vel2 = convert_local_action_to_global(robot, local_ee_vel)
-   #     log.debug(f"Step {i}: Global EE velocity (reconverted): {np.round(global_ee_vel2, 3)}")
-
-
-        # Check if the action exceeds velocity limits and requires sub-steps # if any term in local_ee_vel > 1 or < -1, break the step into smaller steps
-        if np.any(np.abs(local_ee_vel) > max_ee_vel * CONFIG['generator']['action_scale']):
-            num_steps = int(np.ceil(np.max(np.abs(local_ee_vel / (max_ee_vel * CONFIG['generator']['action_scale'])))))
-            log.debug(f"Step {i}: Velocity limit exceeded. Splitting into {num_steps} sub-steps.")
-            for _ in range(num_steps):
-                ee_vel_actions.append(local_ee_vel / num_steps)
-        else:
-            ee_vel_actions.append(local_ee_vel)
-            
-        
-        # if np.any(np.abs(local_ee_vel) > max_ee_vel):
-        #     num_steps = int(np.ceil(np.max(np.abs(local_ee_vel / max_ee_vel))))
-        #     log.debug(f"Step {i}: Velocity limit exceeded. Splitting into {num_steps} sub-steps.")
-        #     for _ in range(num_steps):
-        #         ee_vel_actions.append(local_ee_vel / num_steps)
-        # else:
-        #     ee_vel_actions.append(local_ee_vel)
-            
-    log.info(f"Finished conversion. Produced {len(ee_vel_actions)} total actions.")
-    return ee_vel_actions
-
-def visualize_actions_camera(new_obs):
-    # =====================VISUALIZATION=============================== #
-        # Extract the visual data from the new observation
-        rgb_chw = new_obs['rgb']
-        prev_rgb_chw = new_obs['prev_rgb']
-        mask_hw = new_obs['point_mask']
-
-        # --- Process images for display ---
-        # Transpose from (C, H, W) to (H, W, C) and convert from RGB to BGR for OpenCV
-        current_rgb_img = cv2.cvtColor(np.transpose(rgb_chw, (1, 2, 0)), cv2.COLOR_RGB2BGR)
-        prev_rgb_img = cv2.cvtColor(np.transpose(prev_rgb_chw, (1, 2, 0)), cv2.COLOR_RGB2BGR)
-
-        # Convert the single-channel float mask to a 3-channel BGR image for stacking
-        mask_img = (mask_hw * 255).astype(np.uint8)
-        mask_img_bgr = cv2.cvtColor(mask_img, cv2.COLOR_GRAY2BGR)
-
-        # Add text labels to each image
-        cv2.putText(prev_rgb_img, 'Previous RGB', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-        cv2.putText(current_rgb_img, 'Current RGB', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-        cv2.putText(mask_img_bgr, 'Point Mask', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-
-        # --- Combine and display ---
-        # Stack the three images horizontally to show in one window
-        combined_display = np.hstack([prev_rgb_img, current_rgb_img, mask_img_bgr])
-        cv2.imshow("Generator Stage - Visual Data", combined_display)
-
-        # This line is crucial for the window to update. It waits 1ms.
-        cv2.waitKey(1)
-        # ================================================================= #
-        return
-
-def get_transitions_from_ee_vel(env, ee_vel_actions, CONFIG, optical_flow_model: OpticalFlow = None):
-    observations = []
-    new_observations = []
-    rewards = []
-    dones = []
-    actions = []
-
-    obs, _ = env.reset()
-    obs = ensure_optical_flow(obs, optical_flow_model)
-    count_in_frame = 0
-    action_scale = CONFIG['generator']['action_scale']
-
-    for i, vel in enumerate(ee_vel_actions):
-        if np.isclose(vel, np.zeros(6), atol=0.001).all():
-            continue  # Skip zero actions
-
-        # Unscale the velocity because env.step() applies the scale internally
-        scaled_vel = vel / action_scale
-        action = copy.deepcopy(scaled_vel)
-
-        new_obs, reward, terminated, truncated, _ = env.step(scaled_vel)
-        new_obs = ensure_optical_flow(new_obs, optical_flow_model)
-
-        visualize_actions_camera(new_obs)
-
-        observations.append(obs)
-        new_observations.append(new_obs)
-        rewards.append(reward)
-        dones.append(terminated)
-        actions.append(action)
-
-        if (env.observation['point_mask'] > 0).any():
-            count_in_frame += 1
-
-        obs = new_obs  # Move to next observation, even if done/truncated
-
-    return observations, new_observations, rewards, dones, actions, obs, count_in_frame
-
-def execute_path_with_feedback(env,
-                               path,
-                               control_freq,
-                               max_ee_vel,
-                               config,
-                               optical_flow_model: OpticalFlow = None):
-    """
-    Executes a path step-by-step, recalculating the required velocity at each step
-    based on the robot's actual current state. This is a closed-loop approach.
-    """
-    # --- Data collection lists ---
-    observations = []
-    new_observations = []
-    rewards = []
-    dones = []
-    actions = []
-
-    # Get the initial observation from the environment
-    obs, _ = env.reset()
-    obs = ensure_optical_flow(obs, optical_flow_model)
-    # Ensure robot is at the start of the path
-    env.robot.set_joint_angles_no_collision(path[0])
-
-    # Loop through each target waypoint in the path (starting from the second one)
-    for i in range(len(path) - 1):
-        target_joint_angles = path[i + 1]
-
-        # 1. GET CURRENT STATE: Get the robot's *actual* current joint angles
-        current_joint_angles = env.robot.get_joint_angles()
-
-        # 2. CALCULATE VELOCITY FOR ONE STEP
-        # Calculate required joint velocities to get from ACTUAL to TARGET
-        joint_velocities = (np.array(target_joint_angles) - np.array(current_joint_angles)) * control_freq
-        
-        # Set robot to current pose to calculate the Jacobian correctly
-        # (This is already its state, but good practice to be sure)
-        env.robot.set_joint_angles_no_collision(current_joint_angles)
-        
-        jacobian = env.robot.calculate_jacobian()
-        global_ee_vel = np.matmul(jacobian, joint_velocities)
-        local_ee_vel = convert_global_action_to_local(env.robot, global_ee_vel) # This is our action
-
-        # 3. HANDLE VELOCITY LIMITS (Optional but recommended)
-        # This part is simplified; you can reuse the sub-stepping logic if needed.
-        # Here, we just cap the velocity for this single step.
-        if np.any(np.abs(local_ee_vel) > max_ee_vel):
-            local_ee_vel = np.clip(local_ee_vel, -max_ee_vel, max_ee_vel)
-
-        # 4. EXECUTE THE ACTION & STORE DATA
-        action = copy.deepcopy(local_ee_vel)
-        
-        # Take a step in the environment with the calculated action
-        new_obs, reward, terminated, truncated, _ = env.step(action)
-        new_obs = ensure_optical_flow(new_obs, optical_flow_model)
-        
-        # Store the transition data
-        observations.append(obs)
-        new_observations.append(new_obs)
-        rewards.append(reward)
-        dones.append(terminated)
-        actions.append(action)
-
-        # Update the observation for the next loop iteration
-        obs = new_obs
-
-        # If the episode ends, stop trying to follow the path
-        if terminated or truncated:
-            break
-
-    # Return all the collected data from the trajectory
-    return observations, new_observations, rewards, dones, actions, obs
-
-def append_transition_using_cartesian_planner(env, metadata, last_obs, observations, new_observations,
-                                              rewards, dones, actions, count_in_frame,
-                                              max_ee_vel, optical_flow_model: OpticalFlow = None):
-    if last_obs is None:
-        return observations, new_observations, rewards, dones, actions, count_in_frame
-
-    obs = ensure_optical_flow(last_obs, optical_flow_model)
-    control_time = env.config['simulation_setup']['control_time']
-    action_scale = env.config['generator']['action_scale']
-    goal_pos = metadata['goal_pos']
-
-    # --- Start of Reference Logic ---
-    start_pos, _ = env.robot.get_current_pose(env.robot.tool0_link_idx)
-
-    # --- Visualization for Debugging ---
-    goal_sphere_id = -1
-    start_sphere_id = -1
-    intended_path_line_id = -1
-    actual_path_line_id = -1 # New variable for the second line
-
-    if env.config['simulation_setup']['renders']:
-        goal_sphere_id = draw_debug_sphere(env.pb_client, goal_pos, 0.07, [0, 1, 1, 0.5]) # Cyan Goal
-        start_sphere_id = draw_debug_sphere(env.pb_client, start_pos, 0.05, [0, 0.8, 0.3, 0.5]) # Green Start
-        # Draw the INTENDED path before any movement
-        intended_path_line_id = env.pb_client.addUserDebugLine(start_pos, goal_pos, [1, 0, 1], lineWidth=5) # Magenta Intended Path
-
-    # 1. Calculate the total required velocity ONCE
-    ee_vel_global = np.zeros(6)
-    ee_vel_global[:3] = (np.array(goal_pos) - np.array(start_pos)) / control_time
-    
-    # 2. Convert to local frame and determine the scale factor
-    ee_vel_local = convert_global_action_to_local(env.robot, ee_vel_global)
-    
-    scale = 1.0
-    if np.any(np.abs(ee_vel_local) > max_ee_vel):
-        scale = np.max(np.abs(ee_vel_local)) / max_ee_vel
-    
-    action_per_step = ee_vel_local / (scale + 1e-6)
-    num_steps_to_run = int(1.2* int(scale) / action_scale)
-
-    if not dones or not dones[-1]:
-        for j in range(num_steps_to_run):
-            if np.isclose(action_per_step, np.zeros(6), atol=0.001).all():
-                if dones: dones[-1] = True
-                break
-
-            action = copy.deepcopy(action_per_step)
-            new_obs, reward, terminated, truncated, info = env.step(copy.deepcopy(action),f=2)
-            new_obs = ensure_optical_flow(new_obs, optical_flow_model)
-            
-            visualize_actions_camera(new_obs)
-            
-            actions.append(action)
-            new_observations.append(new_obs)
-            observations.append(obs)
-            rewards.append(reward)
-            
-            if (env.observation['point_mask'] > 0).any():
-                count_in_frame += 1
-
-            if terminated:
-                dones.append(True)
-                break
-            elif info.get('collision_unacceptable_reward', 0) < 0 or info.get('collision_acceptable_reward', 0) < 0:
-                dones.append(False)
-                break
-            elif j == num_steps_to_run - 1: # Last step timeout
-                dones.append(False)
-                break
-            else:
-                dones.append(terminated)
-
-            obs = new_obs
-    
-    # --- NEW VISUALIZATION BLOCK ---
-    if env.config['simulation_setup']['renders']:
-        # Get the final position after all movements are done
-        final_pos, _ = env.robot.get_current_pose(env.robot.tool0_link_idx)
-        
-        # Draw the ACTUAL path taken
-        actual_path_line_id = env.pb_client.addUserDebugLine(start_pos, final_pos, [1, 1, 0], lineWidth=5) # Yellow Actual Path
-        
-        # Add the requested delay to see the lines
-        time.sleep(3)
-
-    # --- Cleanup Visualization ---
-    if goal_sphere_id != -1:
-        env.pb_client.removeBody(goal_sphere_id)
-    if start_sphere_id != -1:
-        env.pb_client.removeBody(start_sphere_id)
-    if intended_path_line_id != -1:
-        env.pb_client.removeUserDebugItem(intended_path_line_id)
-    if actual_path_line_id != -1: # Clean up the new line
-        env.pb_client.removeUserDebugItem(actual_path_line_id)
-            
-    return observations, new_observations, rewards, dones, actions, count_in_frame
-
 
 def _compute_joint_path_length(path):
     if not path or len(path) < 2:
@@ -1187,72 +862,6 @@ def save_rrt_path_to_hdf5(save_path, env_info, fail_mode, waypoints):
             grp.create_dataset('waypoints', data=np.stack(waypoints) if waypoints else np.array([]))
     log.info(f"Saved RRT path to {save_path} under group {name}")
 
-def save_agent_data_to_hdf5(observations, actions, rewards, dones, next_observations,
-                            info, success, tree_info, robot_pos, robot_or, save_path):
-    """Persist one trajectory. Returns the HDF5 group name (from *source_group_key* if provided)."""
-    lock_path = save_path + '.lock'
-    with FileLock(lock_path):
-        mode = 'a' if os.path.exists(save_path) else 'w'
-        with h5py.File(save_path, mode) as f:
-            base_name = None
-            if info is not None:
-                raw = info.get("source_group_key")
-                if raw is not None and str(raw).strip():
-                    base_name = (
-                        str(raw).strip()
-                        .replace("/", "_")
-                        .replace("\\", "_")
-                    )
-            if not base_name:
-                base_name = str(time.time())
-
-            grp_name = base_name
-            dup_n = 0
-            while grp_name in f:
-                dup_n += 1
-                grp_name = f"{base_name}__dup{dup_n}"
-
-            grp = f.create_group(grp_name)
-
-            # === Metadata ===
-            for key, value in tree_info.items():
-                grp.attrs[key] = value
-            grp.attrs['robot_pos'] = robot_pos
-            grp.attrs['robot_or'] = robot_or
-            grp.attrs['success'] = success
-            grp.attrs['hdf5_group_key'] = grp_name
-            if info is not None:
-                for k, v in info.items():
-                    grp.attrs[k] = v
-
-            # === Observations ===
-            obs_keys = observations[0].keys()
-            obs_grp = grp.create_group('observations')
-            for key in obs_keys:
-                stacked_obs = np.stack([obs[key] for obs in observations])
-                obs_grp.create_dataset(key, data=stacked_obs, compression="gzip", compression_opts=4)
-
-            # === Next Observations ===
-            next_obs_grp = grp.create_group('next_observations')
-            for key in obs_keys:
-                stacked_next_obs = np.stack([obs[key] for obs in next_observations])
-                next_obs_grp.create_dataset(key, data=stacked_next_obs, compression="gzip", compression_opts=4)
-
-            # === Actions, Rewards, Dones ===
-            actions = np.stack(actions)
-            rewards = np.asarray(rewards, dtype=np.float64)
-            dones = np.stack(dones)
-
-            grp.create_dataset('actions', data=actions, compression="gzip", compression_opts=4)
-            grp.create_dataset('rewards', data=rewards, compression="gzip", compression_opts=4)
-            grp.create_dataset('dones', data=dones, compression="gzip", compression_opts=4)
-
-    src_key = info.get("source_group_key") if info else None
-    log.info(
-        "Saved %s transitions to %s under HDF5 group %r (source_group_key=%r)",
-        len(actions), save_path, grp_name, src_key,
-    )
-    return grp_name
 
 def reset_robot_for_new_path(env, metadata, start_waypoints):
         """
@@ -2056,163 +1665,13 @@ def run_planner_stage(num_apples_to_plan, run_id=None):
     env.close()
 
 def run_generator_stage(run_id=None):
-    """Stage 2: Load paths, refine them, and generate agent training data."""
-    log.info("="*60)
-    log.info("V_DATAGEN: STAGE 2 - AGENT DATA GENERATION")
-    log.info("="*60)
-    waypoints_dir, agent_data_dir, _ = _ensure_output_dirs()
-    try:
-        run_id, waypoints_path = _resolve_run_id(run_id, waypoints_dir, should_exist=True)
-    except FileNotFoundError as exc:
-        log.error(str(exc))
-        return
-    CONFIG['output']['waypoints_hdf5_path'] = str(waypoints_path)
-    agent_data_path = (agent_data_dir / f"{run_id}.hdf5").resolve()
-    CONFIG['output']['agent_data_hdf5_path'] = str(agent_data_path)
-    log.info(f"Run ID: {run_id}")
-    try:
-        apply_tree_setup_from_waypoints_hdf5(waypoints_path)
-    except (ValueError, KeyError, OSError) as exc:
-        log.error("Cannot auto-apply tree_setup from waypoints HDF5: %s", exc)
-        return
-
-    env = ApplePickingEnv(config=CONFIG)
-    robot = env.robot
-    pb_client = env.pb_client   
-
-    optical_flow_model = None
-    try:
-        optical_flow_model = OpticalFlow(size=DEFAULT_OPTICAL_FLOW_SIZE)
-    except Exception as exc:
-        log.error(f"Failed to initialize optical flow model: {exc}. Falling back to zero-flow observations.", exc_info=True)
-
-    distance_fn, sample_fn, extend_fn, collision_fn = setup_planning_functions(
-        robot, env.tree.pyb_id, CONFIG['planning'], CONFIG['visualization'], env.pb_client, env.tree)
-        
-    with h5py.File(CONFIG['output']['waypoints_hdf5_path'], 'r') as f:
-        path_keys = list(f.keys())
-        log.info(f"Found {len(path_keys)} saved paths to process.")
-        
-        for i, key in enumerate(path_keys):
-            log.info(f"--- ({i+1}/{len(path_keys)}) Processing saved path: {key} ---")
-            grp = f[key]
-            
-            if grp.attrs['fail_mode'] != ResultMode.SUCCESS.value:
-                log.warning(f"Skipping path {key} due to fail_mode: {ResultMode(grp.attrs['fail_mode'])}")
-                continue
-
-            ok, reason = waypoints_metadata_matches_config(grp.attrs)
-            if not ok:
-                log.error(
-                    "Skipping path %s: waypoints HDF5 tree mismatch (%s). "
-                    "Re-run planner with matching --tree-id or fix CONFIG.",
-                    key,
-                    reason,
-                )
-                continue
-
-            waypoints = grp['waypoints'][:]
-            log.debug(f"Loaded {len(waypoints)} waypoints from HDF5 file.")
-            print(f"DEBUG: Original path length from RRT is {len(waypoints)}") 
-
-            if len(waypoints) < 2:
-                log.warning(f"Skipping path {key}, not enough waypoints to form a trajectory.")
-                continue
-            
-            
-            metadata = {k: v for k, v in grp.attrs.items()}
-            # Visualize the target apple for this trajectory
-            apple_pos = metadata['apple_center']
-            goal_sphere_id = draw_debug_sphere(pb_client, apple_pos, 0.05, [0.9, 0.1, 0.1, 0.8])
-            # Visualize the goal position (where the gripper goes)
-            goal_pos = metadata['goal_pos']
-            gripper_goal_id = draw_debug_sphere(pb_client, goal_pos, 0.02, [0.1, 0.9, 0.1, 0.9])
-            log.debug(f"  Desired_pos: {goal_pos}")
-            # Clean up the visualization objects before the next trajectory
-            
-            waypoints_list = waypoints.tolist()
-            metadata = {k: v for k, v in grp.attrs.items()}
-            reset_robot_for_new_path(env, metadata, waypoints_list)
-            
-            refined_path = shortcut_and_refine_path(
-                robot,
-                waypoints_list,
-                extend_fn,
-                collision_fn,
-                CONFIG['planning']['task_space_refinement_threshold'],
-                enable_smoothing=CONFIG['planning'].get('enable_smoothing', True))
-            
-            if len(refined_path) > CONFIG['simulation_setup']['max_steps']:
-                log.warning(f"Skipping path {key}, refined path has too many steps ({len(refined_path)}).")
-                continue
-                
-           #OLD ---------------------------------------------------
-            # ee_vel_actions = convert_ja_to_ee_vel(robot, refined_path, 1.0 / CONFIG['simulation_setup']['control_time'], CONFIG['planning']['max_ee_velocity'])
-            
-            # # Reset robot to the start of the path for simulation
-            # reset_robot_for_new_path(env, metadata, waypoints_list)
-            
-            # log.info("Executing trajectory in simulation to get transitions...")
-            # #path_transitions, last_obs = get_transitions_from_ee_vel(env, ee_vel_actions, CONFIG)
-            # observations, new_observations, rewards, dones, actions, last_obs, count_in_frame = \
-            #     get_transitions_from_ee_vel(env, ee_vel_actions, CONFIG)
-           # ----------------------------------------------------------------
-           
-           # NEW ---------------------------------------------------------
-            log.info("Executing trajectory with feedback to get transitions...")
-            observations, new_observations, rewards, dones, actions, last_obs = \
-                execute_path_with_feedback(env, 
-                                        refined_path, 
-                                        1.0 / CONFIG['simulation_setup']['control_time'], 
-                                        CONFIG['planning']['max_ee_velocity'], 
-                                        CONFIG,
-                                        optical_flow_model=optical_flow_model)
-            # You would need to calculate count_in_frame separately if still needed
-            count_in_frame = sum(1 for obs in new_observations if (obs['point_mask'] > 0).any())
-           # --------------------------------------------------------------  
-            
-            if not observations: # Check if the 'observations' list is empty
-                log.error(f"No transitions were generated for path {key}. Velocities may have all been zero.")
-                continue
-
-            # Append final steps if the trajectory didn't terminate
-            if not dones[-1]:
-                 log.info("Path did not terminate. Appending final cartesian planner steps...")
-                 # Pass all the lists to be appended to
-                 observations, new_observations, rewards, dones, actions, count_in_frame = \
-                    append_transition_using_cartesian_planner(env, metadata, last_obs, observations, new_observations,
-                                                              rewards, dones, actions, count_in_frame,
-                                                              CONFIG['planning']['max_ee_velocity'],
-                                                              optical_flow_model=optical_flow_model)
-
-            if observations and actions: # <-- MODIFIED THIS LINE
-                success = dones[-1] # Success is the last 'done' state
-                info = {
-                    'count_in_frame': count_in_frame,
-                    'path_length': len(actions),
-                    'source_group_key': str(key),
-                }
-                robot_pos, robot_or = metadata['robot_pos'], metadata['robot_or']
-                tree_info = {k: v for k, v in metadata.items() if 'robot' not in k}
-
-                log.info(f"Generated {len(actions)} transitions. Final success state: {success}")
-                
-                # Save all the collected data
-                _h5_grp = save_agent_data_to_hdf5(
-                    observations, actions, rewards, dones, new_observations,
-                    info, success, tree_info, robot_pos, robot_or,
-                    CONFIG['output']['agent_data_hdf5_path'],
-                )
-                log.info("HDF5 group key for path %r -> %r", key, _h5_grp)
-            else:
-                log.error(f"Failed to generate any valid transitions (observations or actions were empty) for path {key}.")
-
-            pb_client.removeBody(goal_sphere_id)
-            pb_client.removeBody(gripper_goal_id)
-
-                
-    log.info("Generator stage complete.")
-    env.close()
+    """Removed: the legacy stage-2 writer produced inconsistent observations (prev_rgb == rgb,
+    mis-scaled cached flow). Use the schema-v2 generator instead."""
+    log.error(
+        "--stage generator was removed. Run: python feature_apple_path_planning/"
+        "generate_agent_data_from_waypoints_2.py --run-id %s --save-only-success", run_id or "<run_id>",
+    )
+    sys.exit(2)
 
 def run_axis_test():
     """
