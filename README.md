@@ -45,7 +45,7 @@ This is the main executable script for the data generation pipeline. It uses com
 
 - Planner (Stage 1): Loads the simulation, finds apples, and uses RRT-Connect to plan collision-free paths to them, saving the paths to ```rrt_paths.hdf5```.
 
-- Generator (Stage 2): Loads the saved paths, refines them, and executes them in the environment to collect and save "expert" trajectory data (observations, actions, rewards) to ```apple_picking_expert_data.hdf5```.
+- Generator (Stage 2): moved to ```feature_apple_path_planning/generate_agent_data_from_waypoints_2.py``` (see Stage 2 below); `--stage generator` now exits with that pointer.
 
 - Visualization: Loads and replays the saved RRT paths in the PyBullet GUI for visual inspection.
 
@@ -72,11 +72,14 @@ This stage loads the environment and uses the RRT-Connect algorithm to find coll
 python run_apple_data_generator.py --stage planner
 ```
 ### Stage 2: Run the Data Generator 
-This stage loads the paths from ```rrt_paths.hdf5```, refines them (smoothing and task-space interpolation), and then executes them in the environment. It records all the (observation, action, reward, next_observation) data from these "expert" trajectories and saves them to ```apple_picking_expert_data.hdf5```. 
+Loads the planner waypoints (`output/waypoints/<run_id>.hdf5`), refines them and executes them with a closed-loop Jacobian controller in `ApplePickingEnv` (DIRECT mode, same renderer as training). Each trajectory is saved in agent-data schema v2 (`feature_apple_path_planning/agent_data.py`): every frame once (rgb, depth in mm, apple mask, proprio, `pregrasp_in_tool`), plus actions, rewards and env terminal/truncated flags. Then validate the file before training:
 
 ```
-python run_apple_data_generator.py --stage generator
+python feature_apple_path_planning/generate_agent_data_from_waypoints_2.py --run-id tree08 --path-rank 1 --out-id tree08_rank1_v2 --save-only-success
+python feature_apple_path_planning/validate_agent_data.py --run-id tree08_rank1_v2 --policy-smoke --replay 2
 ```
+
+Training picks the policy's image inputs from the same data: `train_apple_picking_expert.py --run_id tree08_rank1_v2 --image_channels depth,mask` (any of `flow`, `depth`, `mask`, or `none` for proprio only).
 
 ## Utility & Debugging Commands
 
