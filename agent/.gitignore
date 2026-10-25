@@ -1,0 +1,8 @@
+# Workspace outputs (relative to where commands run) and Python caches
+output/
+logs/
+runs/
+wandb/
+__pycache__/
+*.py[cod]
+*.egg-info/
