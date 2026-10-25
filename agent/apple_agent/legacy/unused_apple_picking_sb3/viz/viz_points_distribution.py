@@ -1,3 +1,4 @@
+# Previous location: agent/apple_agent/apple_picking_sb3/viz/viz_points_distribution.py (originally feature_apple_agent/apple_picking_sb3/viz/viz_points_distribution.py). Unused by the pipeline; kept for reference.
 # In this file I want to lead orientation of points in a pkl file.
 # I want to bin these orientations and plot the distribution of points in each bin.
 

@@ -1,3 +1,4 @@
+# Previous location: agent/apple_agent/apple_picking_sb3/pruning_gym/callbacks/eval_callbacks.py (originally feature_apple_agent/apple_picking_sb3/pruning_gym/callbacks/eval_callbacks.py). Unused by the pipeline; kept for reference.
 import copy
 import os
 from typing import Dict, Any, Union, Optional

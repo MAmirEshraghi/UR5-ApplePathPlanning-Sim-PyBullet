@@ -183,29 +183,10 @@ def add_arg_to_env(key, val, env_name, parsed_args_dict):
 
 
 def make_or_bins(args, train_type, tree_type):
-    # TODO: replace path with a variable instead of repeating it
-    from apple_agent.apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
-    from apple_agent.apple_picking_sb3.pruning_gym.tree import Tree
-    if os.path.exists(f"{tree_type}_{train_type}_or_bins_{args['tree_count']}.pkl"):
-        with open(f"{tree_type}_{train_type}_or_bins_{args['tree_count']}.pkl", "rb") as f:
-            or_bins = pickle.load(f)
-            for key in or_bins.keys():
-                random.shuffle(or_bins[key])
-    else:
-        data_env_train = PruningEnv(**args, make_trees=True)
-        or_bins = Tree.create_bins(18, 36)
-        for key in or_bins.keys():
-            for i in data_env_train.trees:
-                or_bins[key].extend(i.or_bins[key])
-
-        del data_env_train
-        # Shuffle the data inside the bins
-        for key in or_bins.keys():
-            random.shuffle(or_bins[key])
-
-        with open(f"{tree_type}_{train_type}_or_bins_{args['tree_count']}.pkl", "wb") as f:
-            pickle.dump(or_bins, f)
-    return or_bins
+    """Old pruning-env helper, never called by the apple pipeline. It needs the pruning env, now in
+    apple_agent/legacy/unused_apple_picking_sb3/pruning_gym/. Original body: commit 8168e4f,
+    feature_apple_agent/apple_picking_sb3/pruning_gym/helpers.py."""
+    raise NotImplementedError("make_or_bins depends on the unused pruning env (see legacy/unused_apple_picking_sb3)")
 
 
 def get_policy_kwargs(args_policy, args_env, features_extractor_class):

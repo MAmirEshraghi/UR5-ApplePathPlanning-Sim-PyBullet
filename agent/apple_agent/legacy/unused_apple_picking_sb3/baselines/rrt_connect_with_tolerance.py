@@ -1,3 +1,4 @@
+# Previous location: agent/apple_agent/apple_picking_sb3/baselines/rrt_connect_with_tolerance.py (originally feature_apple_agent/apple_picking_sb3/baselines/rrt_connect_with_tolerance.py). Unused by the pipeline; kept for reference.
 
 def rrt_connect(q1, q2, distance_fn, sample_fn, extend_fn, collision_fn,
                 max_iterations=RRT_ITERATIONS, max_time=INF, verbose=False,

@@ -1,3 +1,4 @@
+# Previous location: agent/apple_agent/apple_picking_sb3/viz/viz_2d_task.py (originally feature_apple_agent/apple_picking_sb3/viz/viz_2d_task.py). Unused by the pipeline; kept for reference.
 # In this file I want to read from episode_info.csv file
 # Calculate latitudes and longitudes of using orientation
 # Bin each latitude and for each bin calculate average perpendicular cosine sim error

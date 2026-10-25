@@ -1,3 +1,4 @@
+# Previous location: agent/apple_agent/apple_picking_sb3/args/args.py (originally feature_apple_agent/apple_picking_sb3/args/args.py). Unused by the pipeline; kept for reference.
 # Repace bool elements with flags (Bool doesnt work)
 # TODO: Add a tree type argument to the environment and the tree class
 # TODO: Dynamically populate tree paths using the tree type

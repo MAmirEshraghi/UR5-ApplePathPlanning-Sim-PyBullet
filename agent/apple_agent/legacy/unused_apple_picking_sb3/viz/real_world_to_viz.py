@@ -1,3 +1,4 @@
+# Previous location: agent/apple_agent/apple_picking_sb3/viz/real_world_to_viz.py (originally feature_apple_agent/apple_picking_sb3/viz/real_world_to_viz.py). Unused by the pipeline; kept for reference.
 import numpy as np
 import pandas as pd
 

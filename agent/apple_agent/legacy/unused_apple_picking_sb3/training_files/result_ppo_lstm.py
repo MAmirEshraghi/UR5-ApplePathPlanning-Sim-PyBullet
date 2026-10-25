@@ -1,3 +1,4 @@
+# Previous location: agent/apple_agent/apple_picking_sb3/training_files/result_ppo_lstm.py (originally feature_apple_agent/apple_picking_sb3/training_files/result_ppo_lstm.py). Unused by the pipeline; kept for reference.
 import os
 import sys
 

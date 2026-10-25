@@ -1,3 +1,4 @@
+# Previous location: agent/apple_agent/apple_picking_sb3/baselines/baselines_callbacks.py (originally feature_apple_agent/apple_picking_sb3/baselines/baselines_callbacks.py). Unused by the pipeline; kept for reference.
 import os
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))

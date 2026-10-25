@@ -1,3 +1,4 @@
+# Previous location: agent/apple_agent/apple_picking_sb3/testfiles/remove_erraneous_trajectories.py (originally feature_apple_agent/apple_picking_sb3/testfiles/remove_erraneous_trajectories.py). Unused by the pipeline; kept for reference.
 import os
 import sys
 import glob

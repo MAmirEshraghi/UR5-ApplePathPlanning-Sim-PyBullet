@@ -1,3 +1,4 @@
+# Previous location: agent/apple_agent/apple_picking_sb3/testfiles/split_obj_by_color.py (originally feature_apple_agent/apple_picking_sb3/testfiles/split_obj_by_color.py). Unused by the pipeline; kept for reference.
 import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
