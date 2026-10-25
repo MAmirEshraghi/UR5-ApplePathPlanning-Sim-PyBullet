@@ -4,7 +4,7 @@ from pathlib import Path
 
 import h5py
 
-from debug._common import (
+from apple_agent.rl.debug._common import (
     compare_obs_pair,
     hdf5_obs_step0,
     run_with_session_log,

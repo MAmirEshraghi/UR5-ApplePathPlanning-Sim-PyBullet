@@ -6,14 +6,14 @@ from typing import Dict, List, Optional, Tuple
 import h5py
 import numpy as np
 
-from debug._common import (
+from apple_agent.rl.debug._common import (
     action_l2,
     agent_data_path,
     load_policy,
     run_with_session_log,
     setup_env,
 )
-from eval_apple_picking_expert import (
+from apple_agent.rl.eval_apple_picking_expert import (
     _classify_episode,
     _load_expert_metadata,
     _reconfigure_to_trajectory,

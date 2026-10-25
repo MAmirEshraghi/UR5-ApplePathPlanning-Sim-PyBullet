@@ -2,7 +2,7 @@
 """
 Sanity checks for agent-data schema v2 (run before training on a newly generated file).
 
-    python feature_apple_path_planning/validate_agent_data.py --run-id tree08_rank1_v2 \
+    python -m apple_agent.data.validate_agent_data --run-id tree08_rank1_v2 \
         [--policy-smoke] [--replay 2]
 
 Data checks (always):
@@ -25,13 +25,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-for _p in (_REPO_ROOT, _REPO_ROOT / "feature_apple_agent"):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-
-from feature_apple_path_planning import agent_data  # noqa: E402
-from feature_apple_path_planning.obs_spec import CHANNEL_ORDER, IMAGE_KEYS  # noqa: E402
+from apple_agent.data import agent_data
+from apple_agent.data.obs_spec import CHANNEL_ORDER, IMAGE_KEYS
 
 REQUIRED_ATTRS = (
     "apple_center", "goal_pos", "goal_orn", "initial_joint_angles", "tree_id", "tree_scale",
@@ -129,9 +124,9 @@ def policy_smoke(path: Path) -> None:
     import torch as th
     from gymnasium import spaces
     from sb3_contrib.common.recurrent.type_aliases import RNNStates
-    from apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
-    from apple_picking_sb3.pruning_gym.models import Encoder
-    from feature_apple_path_planning.obs_spec import image_keys_for_channels
+    from apple_agent.apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
+    from apple_agent.apple_picking_sb3.pruning_gym.models import Encoder
+    from apple_agent.data.obs_spec import image_keys_for_channels
 
     with h5py.File(path, "r") as f:
         grp = f[next(iter(f.keys()))]
@@ -167,9 +162,9 @@ def policy_smoke(path: Path) -> None:
 
 def replay_parity(path: Path, run_id: str, n_traj: int) -> None:
     """Replay stored actions from the stored start state; env observations must match stored frames."""
-    from feature_apple_path_planning.apple_picking_env import ApplePickingEnv
-    from feature_apple_path_planning.run_apple_data_generator import CONFIG
-    from train_apple_picking_expert import _apply_tree_setup_for_training
+    from apple_agent.envs.apple_picking_env import ApplePickingEnv
+    from apple_agent.config import CONFIG
+    from apple_agent.rl.train_apple_picking_expert import _apply_tree_setup_for_training
 
     config = {**CONFIG, "simulation_setup": {**CONFIG["simulation_setup"], "renders": False, "image_channels": None}}
     _apply_tree_setup_for_training(config, run_id, path)
@@ -225,7 +220,7 @@ def main() -> int:
 
     # mirror stdout to logs/validate_agent_data/<timestamp>_<run_id>.log
     import datetime
-    log_path = _REPO_ROOT / "logs" / "validate_agent_data" / f"{datetime.datetime.now():%Y%m%d_%H%M%S}_{args.run_id}.log"
+    log_path = Path("logs").resolve() / "validate_agent_data" / f"{datetime.datetime.now():%Y%m%d_%H%M%S}_{args.run_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_fp = open(log_path, "w", buffering=1, encoding="utf-8")
     terminal = sys.stdout
@@ -242,13 +237,13 @@ def main() -> int:
     sys.stdout = _Tee()
     print(f"log: {log_path}")
 
-    path = _REPO_ROOT / "output" / "agent_data" / f"{args.run_id}.hdf5"
+    path = Path("output").resolve() / "agent_data" / f"{args.run_id}.hdf5"
     if not path.is_file():
         print(f"not found: {path}")
         return 1
     flow_model = None
     if not args.no_flow_stats:
-        from apple_picking_sb3.pruning_gym.optical_flow import OpticalFlow
+        from apple_agent.apple_picking_sb3.pruning_gym.optical_flow import OpticalFlow
         flow_model = OpticalFlow(size=(224, 224))
     with h5py.File(path, "r") as f:
         keys = list(f.keys())

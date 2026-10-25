@@ -38,7 +38,7 @@ For every SUCCESS group the script:
           next frame. Frame 0 is the bootstrap observation.
   5. Runs a short cartesian goal-correction pass at the end (pure physics).
   6. Validates and saves to output/agent_data/<out_id>.hdf5 in agent-data schema v2
-     (see feature_apple_path_planning/agent_data.py): every frame stored once.
+     (see apple_agent/data/agent_data.py): every frame stored once.
 
 Why no teleportation between segments?
   Because the RL agent never teleports at inference time.  By generating data
@@ -46,28 +46,28 @@ Why no teleportation between segments?
   together exactly — replaying them through env.step() reproduces the identical
   trajectory with matching rewards and no self-collision drift.
 
-Run from repository root (venv activated):
+Run from the workspace root (where output/ and logs/ live), venv activated:
 
-    python feature_apple_path_planning/generate_agent_data_from_waypoints_2.py \\
+    python -m apple_agent.data.generate_agent_data_from_waypoints_2 \\
         --run-id tree08 --path-rank 1 --out-id tree08_rank1_v2 --save-only-success
 
 Process only one group:
 
-    PYTHONPATH=. python feature_apple_path_planning/playground/generate_agent_data_from_waypoints_2.py \\
+    python -m apple_agent.data.generate_agent_data_from_waypoints_2 \\
         --run-id 20260504_203032 --group-key <key>
 
 Tip — defaults match the smoother “config 1” baseline (step_scale=0.3, alpha=0.55, dq_cap=0.03).
 
 Experimental longer / stricter correction (optional):
 
-    PYTHONPATH=. python feature_apple_path_planning/playground/generate_agent_data_from_waypoints_2.py \\
+    python -m apple_agent.data.generate_agent_data_from_waypoints_2 \\
         --run-id 20260504_203032 \\
         --final-correction-steps 45 \\
         --final-correction-divergence-min-corr-idx 2
 
 Check what was saved:
 
-    PYTHONPATH=. python feature_apple_path_planning/playground/generate_agent_data_from_waypoints_2.py \\
+    python -m apple_agent.data.generate_agent_data_from_waypoints_2 \\
         --run-id 20260504_203032 --verify-hdf5
 
 Log is written to:
@@ -95,26 +95,11 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 from zenlog import log
 
-# ── resolve roots and insert into sys.path ────────────────────────────────────
-_FP_ROOT = Path(__file__).resolve().parent       # feature_apple_path_planning/
-_REPO_ROOT = Path(__file__).resolve().parents[1]  # repo root
-for _p in (_REPO_ROOT, _FP_ROOT):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-
-# ── load generator module (CONFIG, planning helpers, save fn, …) ─────────────
-_dg_spec = importlib.util.spec_from_file_location(
-    "apple_data_generator_72",
-    _FP_ROOT / "run_apple_data_generator.py",
-)
-dg = importlib.util.module_from_spec(_dg_spec)
-assert _dg_spec.loader is not None
-_dg_spec.loader.exec_module(dg)
-
-from feature_apple_path_planning.apple_picking_env import ApplePickingEnv
-from feature_apple_path_planning import agent_data  # noqa: E402
-from feature_apple_path_planning.obs_spec import DEPTH_UNITS_PER_M  # noqa: E402
-from utils_conversions import convert_global_action_to_local  # noqa: E402
+from apple_agent.planning import run_apple_data_generator as dg  # CONFIG, planning helpers
+from apple_agent.envs.apple_picking_env import ApplePickingEnv
+from apple_agent.data import agent_data
+from apple_agent.data.obs_spec import DEPTH_UNITS_PER_M
+from apple_agent.envs.utils_conversions import convert_global_action_to_local
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -190,7 +175,7 @@ def setup_logging(debug: bool = False) -> Path:
     Default log level: INFO (suppresses per-step env DEBUG spam).
     Use --debug-log for full DEBUG output.
     """
-    base = _REPO_ROOT / "logs" / dg.LOG_SESSION_SUBDIR
+    base = Path("logs") / dg.LOG_SESSION_SUBDIR
     base.mkdir(parents=True, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = (base / f"{ts}_agent_data_gen.log").resolve()
@@ -1221,7 +1206,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    os.chdir(_REPO_ROOT)
     setup_logging(debug=args.debug_log)
 
     waypoints_dir, agent_data_dir, _ = dg._ensure_output_dirs()

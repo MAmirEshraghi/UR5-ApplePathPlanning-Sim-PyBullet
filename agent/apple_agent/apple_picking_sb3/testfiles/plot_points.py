@@ -3,12 +3,12 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
-from apple_picking_sb3.pruning_gym.models import *
+from apple_agent.apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_agent.apple_picking_sb3.pruning_gym.models import *
 import numpy as np
 import argparse
-from apple_picking_sb3.args.args_test import args
-from apple_picking_sb3.pruning_gym.helpers import optical_flow_create_shared_vars, \
+from apple_agent.apple_picking_sb3.args.args_test import args
+from apple_agent.apple_picking_sb3.pruning_gym.helpers import optical_flow_create_shared_vars, \
     set_args, organize_args, add_arg_to_env
 
 # Create the ArgumentParser object

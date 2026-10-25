@@ -15,19 +15,13 @@ from typing import List, Optional, Tuple
 import h5py
 import numpy as np
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-_AGENT_DIR = Path(__file__).resolve().parent
-if str(_AGENT_DIR) not in sys.path:
-    sys.path.insert(0, str(_AGENT_DIR))
 
-from feature_apple_path_planning.apple_picking_env import ApplePickingEnv
-from feature_apple_path_planning.run_apple_data_generator import CONFIG as APPLE_PICKING_CONFIG
+from apple_agent.envs.apple_picking_env import ApplePickingEnv
+from apple_agent.config import CONFIG as APPLE_PICKING_CONFIG
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from eval_apple_picking_expert import (
+from apple_agent.rl.eval_apple_picking_expert import (
     _classify_episode,
     _load_expert_metadata,
     _per_tree_summary,
@@ -35,7 +29,7 @@ from eval_apple_picking_expert import (
     _summarize_episodes,
     _tree_label,
 )
-from train_apple_picking_expert import _apply_tree_setup_for_training, _log_train_data
+from apple_agent.rl.train_apple_picking_expert import _apply_tree_setup_for_training, _log_train_data
 
 
 def run_expert_replay_episode(

@@ -3,10 +3,10 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 import pytest
-from apple_picking_sb3.pruning_gym.tree import Tree
-from apple_picking_sb3.pruning_gym import MESHES_AND_URDF_PATH
-from apple_picking_sb3.pruning_gym.pyb_utils import pyb_utils
-from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_agent.apple_picking_sb3.pruning_gym.tree import Tree
+from apple_agent.apple_picking_sb3.pruning_gym import MESHES_AND_URDF_PATH
+from apple_agent.apple_picking_sb3.pruning_gym.pyb_utils import pyb_utils
+from apple_agent.apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
 import numpy as np
 
 

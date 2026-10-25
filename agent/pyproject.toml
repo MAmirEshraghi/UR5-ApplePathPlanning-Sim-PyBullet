@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "apple_agent"
+version = "0.1.0"
+description = "Expert data generation and RL/BC training for UR5 apple picking on top of pybullet_tree_sim."
+requires-python = ">=3.9"
+authors = [{ name = "Robin Eshraghi" }]
+dependencies = [
+    # Simulator (sibling directory today; after the split pin a tag, e.g.
+    # "pybullet_tree_sim @ git+https://github.com/<user>/<sim-fork>@v0.1.0").
+    "pybullet_tree_sim",
+    "numpy==1.26.4",
+    "filelock",
+    "gymnasium",
+    "h5py",
+    "opencv-python",
+    "pybullet==3.2.6",
+    "pybullet-planning",
+    "scipy",
+    "zenlog",
+    # learning
+    "imageio",
+    "matplotlib",
+    "pillow",
+    "psutil",
+    "sb3-contrib",
+    "seaborn",
+    "stable-baselines3",
+    "torch",
+    "torchvision",
+    "wandb",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["apple_agent"]

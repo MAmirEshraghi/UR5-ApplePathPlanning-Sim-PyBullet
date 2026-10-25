@@ -6,7 +6,7 @@ import h5py
 import numpy as np
 import torch as th
 
-from debug._common import (
+from apple_agent.rl.debug._common import (
     action_l2,
     load_policy,
     run_with_session_log,

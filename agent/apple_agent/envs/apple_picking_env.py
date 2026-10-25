@@ -16,7 +16,7 @@ Description:
     and reward computation for learning-based control.
 
 Usage:
-    from apple_picking_env import ApplePickingEnv
+    from apple_agent.envs.apple_picking_env import ApplePickingEnv
     env = ApplePickingEnv(config)
     obs, info = env.reset()
     obs, reward, done, truncated, info = env.step(action)
@@ -42,7 +42,7 @@ from pybullet_tree_sim.robot import Robot
 from pybullet_tree_sim.tree import Tree
 
 from .utils_conversions import convert_local_action_to_global, convert_global_action_to_local
-from .obs_spec import IMAGE_KEYS, depth_m_to_mm, image_keys_for_channels
+from apple_agent.data.obs_spec import IMAGE_KEYS, depth_m_to_mm, image_keys_for_channels
 
 import time
 
@@ -297,7 +297,7 @@ class ApplePickingEnv(gym.Env):
 
     def _refresh_apple_debug_markers(self):
         """Red spheres offset from apple centroids toward the robot (visible in GUI)."""
-        from feature_apple_path_planning.viz_debug import (
+        from apple_agent.planning.viz_debug import (
             apple_marker_surface_position,
             draw_debug_sphere,
             gui_refresh,
@@ -353,7 +353,7 @@ class ApplePickingEnv(gym.Env):
 
     def _refresh_trajectory_target_markers(self) -> None:
         """Blue sphere on target apple + marker at pre-grasp (reward goal); cleared each reconfigure."""
-        from feature_apple_path_planning.viz_debug import (
+        from apple_agent.planning.viz_debug import (
             apple_marker_surface_position,
             draw_debug_sphere,
             gui_refresh,
@@ -647,7 +647,7 @@ class ApplePickingEnv(gym.Env):
         return observation, reward, terminated, truncated, info
 
     def _planning_collision_objects_and_labels(self):
-        """Match feature_apple_path_planning planning_config: obstacle ids + acceptable/unacceptable lists."""
+        """Match CONFIG['planning']: obstacle ids + acceptable/unacceptable lists."""
         pl = self.config['planning']
         collision_objects = {label: self.tree.pyb_id for label in pl['collision_labels']}
         acceptable = list(pl.get('acceptable_collision_labels', []))

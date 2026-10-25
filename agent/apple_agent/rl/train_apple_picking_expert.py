@@ -11,34 +11,26 @@ import random
 from pathlib import Path
 import psutil
 
-# --- Adapt paths: repo root (pybullet_tree_sim, feature_apple_path_planning) then this dir (apple_picking_sb3) ---
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
-_AGENT_DIR = os.path.abspath(os.path.dirname(__file__))
-if _AGENT_DIR not in sys.path:
-    sys.path.insert(0, _AGENT_DIR)
-
 # --- Imports from Apple Picking Project ---
-from feature_apple_path_planning.apple_picking_env import ApplePickingEnv
-from feature_apple_path_planning import agent_data
-from feature_apple_path_planning.obs_spec import parse_image_channels
-from feature_apple_path_planning.run_apple_data_generator import (
-    CONFIG as APPLE_PICKING_CONFIG,
+from apple_agent.config import CONFIG as APPLE_PICKING_CONFIG
+from apple_agent.envs.apple_picking_env import ApplePickingEnv
+from apple_agent.data import agent_data
+from apple_agent.data.obs_spec import parse_image_channels
+from apple_agent.planning.run_apple_data_generator import (
     apply_tree_setup_from_waypoints_hdf5,
     tree_id_str_from_config,
 )
 
 # --- Imports from Pruning SB3 Project ---
-from apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
+from apple_agent.apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
 #from pruning_sb3.ppo_recurrent_ae import RecurrentPPOAEWithExpert
-from apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAEWithExpert
+from apple_agent.apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAEWithExpert
 #from pruning_sb3.policies import RecurrentActorCriticPolicy
 #from pruning_sb3.models import Encoder
-from apple_picking_sb3.pruning_gym.models import Encoder
+from apple_agent.apple_picking_sb3.pruning_gym.models import Encoder
 
 #from train_callbacks
-from apple_picking_sb3.pruning_gym.callbacks.train_callbacks import PruningCheckpointCallback
+from apple_agent.apple_picking_sb3.pruning_gym.callbacks.train_callbacks import PruningCheckpointCallback
 
 from stable_baselines3.common.callbacks import BaseCallback
 

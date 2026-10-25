@@ -8,11 +8,6 @@ import argparse
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_AGENT_DIR = Path(__file__).resolve().parents[1]
-for _p in (_REPO_ROOT, _AGENT_DIR):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
 
 
 def _probe_cuda() -> tuple[bool, str | None]:
@@ -106,7 +101,7 @@ def main() -> None:
     resolved_device = _bootstrap_device(args.device)
 
     # PyBullet import chain only after CUDA bootstrap.
-    from debug.diag_policy_multistep_l2_impl import run_diagnostic
+    from apple_agent.rl.debug.diag_policy_multistep_l2_impl import run_diagnostic
 
     run_diagnostic(args, resolved_device)
 

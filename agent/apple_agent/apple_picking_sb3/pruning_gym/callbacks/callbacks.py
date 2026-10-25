@@ -1,12 +1,11 @@
 import os
 import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 import math
 import random
 from abc import abstractmethod
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback, EventCallback
-from apple_picking_sb3.pruning_gym.helpers import roundup, rounddown
+from apple_agent.apple_picking_sb3.pruning_gym.helpers import roundup, rounddown
 
 class PruningSetGoalCallback(BaseCallback):
     def __init__(self, verbose=0):

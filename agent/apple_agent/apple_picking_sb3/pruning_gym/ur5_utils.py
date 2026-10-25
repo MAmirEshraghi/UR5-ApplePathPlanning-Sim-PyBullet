@@ -4,7 +4,6 @@ from typing import Optional, Tuple
 
 from numpy import ndarray
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 import numpy as np
 import pybullet
 

@@ -3,7 +3,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 import pywavefront
 from collections import defaultdict
-from apple_picking_sb3.pruning_gym import label
+from apple_agent.apple_picking_sb3.pruning_gym import label
 
 def parse_labelled_tree(file_path):
     scene = pywavefront.Wavefront(file_path, collect_faces=True)

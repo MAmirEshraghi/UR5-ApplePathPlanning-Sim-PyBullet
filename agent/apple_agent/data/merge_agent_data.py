@@ -14,13 +14,13 @@ callback (random trajectory per episode) naturally spans every tree.
 
 Run from repository root (venv activated):
 
-    PYTHONPATH=. python feature_apple_path_planning/merge_agent_data.py \\
+    python -m apple_agent.data.merge_agent_data \\
         --inputs tree00 tree01 tree02 tree03 tree04 tree05 tree06 tree07 tree08 tree09 \\
         --output trees00to09
 
 Or merge a contiguous range with a shared prefix:
 
-    PYTHONPATH=. python feature_apple_path_planning/merge_agent_data.py \\
+    python -m apple_agent.data.merge_agent_data \\
         --range 0-9 --prefix tree --output trees00to09
 """
 
@@ -34,8 +34,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-AGENT_DATA_DIR = _REPO_ROOT / "output" / "agent_data"
+AGENT_DATA_DIR = Path("output") / "agent_data"  # relative to the workspace (current directory)
 
 
 def parse_range(value: str) -> list[int]:
@@ -109,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     print("  per-tree group counts:", flush=True)
     for tid, n in sorted(per_tree.items()):
         print(f"    {tid}: {n}", flush=True)
-    print(f"\nTrain with:\n  PYTHONPATH=. python feature_apple_agent/train_apple_picking_expert.py --run_id {args.output}", flush=True)
+    print(f"\nTrain with:\n  python -m apple_agent.rl.train_apple_picking_expert --run_id {args.output}", flush=True)
     return 0
 
 

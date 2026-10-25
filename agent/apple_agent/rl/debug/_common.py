@@ -1,4 +1,4 @@
-"""Shared helpers for feature_apple_agent/debug diagnostics."""
+"""Shared helpers for apple_agent.rl.debug diagnostics."""
 import datetime
 import json
 import random
@@ -10,27 +10,20 @@ import h5py
 import numpy as np
 import torch as th
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_AGENT_DIR = Path(__file__).resolve().parents[1]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-if str(_AGENT_DIR) not in sys.path:
-    sys.path.insert(0, str(_AGENT_DIR))
-
-from feature_apple_path_planning.apple_picking_env import ApplePickingEnv
-from feature_apple_path_planning.run_apple_data_generator import CONFIG as APPLE_PICKING_CONFIG
-from apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAEWithExpert
+from apple_agent.envs.apple_picking_env import ApplePickingEnv
+from apple_agent.config import CONFIG as APPLE_PICKING_CONFIG
+from apple_agent.apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAEWithExpert
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from feature_apple_path_planning import agent_data
-from eval_apple_picking_expert import (
+from apple_agent.data import agent_data
+from apple_agent.rl.eval_apple_picking_expert import (
     _load_expert_metadata,
     checkpoint_image_channels,
     _reconfigure_to_trajectory,
     _vec_obs_from_env,
 )
-from train_apple_picking_expert import _apply_tree_setup_for_training, _log_train_data
+from apple_agent.rl.train_apple_picking_expert import _apply_tree_setup_for_training, _log_train_data
 
 LOG_DIR = Path("logs") / "debug"
 JSON_DIR = LOG_DIR / "json"

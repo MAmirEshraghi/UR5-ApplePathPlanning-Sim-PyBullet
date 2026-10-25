@@ -20,7 +20,7 @@ from stable_baselines3.common.utils import zip_strict
 from torch import nn
 from sb3_contrib.common.recurrent.type_aliases import RNNStates
 from stable_baselines3.common.policies import BasePolicy
-from apple_picking_sb3.pruning_gym.running_mean_std import RunningMeanStd
+from apple_agent.apple_picking_sb3.pruning_gym.running_mean_std import RunningMeanStd
 import pickle
 from stable_baselines3.common.preprocessing import get_action_dim
 
@@ -33,8 +33,8 @@ from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import torch.nn.functional as F
 
 # Optical flow
-from apple_picking_sb3.pruning_gym.optical_flow import OpticalFlow
-from feature_apple_path_planning.obs_spec import (
+from apple_agent.apple_picking_sb3.pruning_gym.optical_flow import OpticalFlow
+from apple_agent.data.obs_spec import (
     CHANNEL_DIMS,
     DEPTH_MAX_M,
     DEPTH_UNITS_PER_M,

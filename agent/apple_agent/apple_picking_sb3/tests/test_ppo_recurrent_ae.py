@@ -5,15 +5,15 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.
 
 import pytest
 from unittest.mock import Mock, patch
-from apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAEWithExpert
-from apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
-from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
-from apple_picking_sb3.pruning_gym import MESHES_AND_URDF_PATH
-from apple_picking_sb3.pruning_gym.models import AutoEncoder
+from apple_agent.apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAEWithExpert
+from apple_agent.apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
+from apple_agent.apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_agent.apple_picking_sb3.pruning_gym import MESHES_AND_URDF_PATH
+from apple_agent.apple_picking_sb3.pruning_gym.models import AutoEncoder
 from gymnasium import spaces
 import numpy as np
 import torch as th
-from apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
+from apple_agent.apple_picking_sb3.algo.PPOLSTMAE.policies import RecurrentActorCriticPolicy
 from sb3_contrib.common.recurrent.type_aliases import RNNStates
 import torch as th
 # self.observation_space = spaces.Dict({

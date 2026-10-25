@@ -14,22 +14,16 @@ from typing import Any, Dict, List, Optional, Tuple
 import h5py
 import numpy as np
 
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
-_AGENT_DIR = os.path.abspath(os.path.dirname(__file__))
-if _AGENT_DIR not in sys.path:
-    sys.path.insert(0, _AGENT_DIR)
 
-from feature_apple_path_planning.apple_picking_env import ApplePickingEnv
-from feature_apple_path_planning.run_apple_data_generator import CONFIG as APPLE_PICKING_CONFIG
-from feature_apple_path_planning import agent_data
-from apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAEWithExpert
+from apple_agent.envs.apple_picking_env import ApplePickingEnv
+from apple_agent.config import CONFIG as APPLE_PICKING_CONFIG
+from apple_agent.data import agent_data
+from apple_agent.apple_picking_sb3.algo.PPOLSTMAE.ppo_recurrent_ae import RecurrentPPOAEWithExpert
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.save_util import json_to_data
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from train_apple_picking_expert import _apply_tree_setup_for_training, _log_train_data
+from apple_agent.rl.train_apple_picking_expert import _apply_tree_setup_for_training, _log_train_data
 
 
 def _load_expert_metadata(hdf5_path: str) -> Tuple[List[str], Dict[str, dict]]:

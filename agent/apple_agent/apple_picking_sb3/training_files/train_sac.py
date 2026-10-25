@@ -3,11 +3,11 @@ import argparse
 import torch as th
 from helpers import init_wandb, linear_schedule, exp_schedule, optical_flow_create_shared_vars
 from models import AutoEncoder
-from apple_picking_sb3.algo.SACAE.policies import SACPolicy
-from apple_picking_sb3.algo.SACAE.sac_ae import SAC
-from apple_picking_sb3.args.args import args_dict
-from apple_picking_sb3.pruning_gym.custom_callbacks import CustomEvalCallback, CustomTrainCallback
-from apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
+from apple_agent.apple_picking_sb3.algo.SACAE.policies import SACPolicy
+from apple_agent.apple_picking_sb3.algo.SACAE.sac_ae import SAC
+from apple_agent.apple_picking_sb3.args.args import args_dict
+from apple_agent.apple_picking_sb3.pruning_gym.custom_callbacks import CustomEvalCallback, CustomTrainCallback
+from apple_agent.apple_picking_sb3.pruning_gym.pruning_env import PruningEnv
 from stable_baselines3.common import utils
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv
