@@ -24,7 +24,7 @@ Example:
 
     python lpy_treesim/export_pybullet_tree_v3.py --tree-id 17 --lpy-index 17 --regenerate-urdf
 
-    PYTHONPATH=. python feature_apple_path_planning/playground/tests/run_sim_tree_viewer.py \\
+    python tools/tree_viewers/run_sim_tree_viewer.py \\
         --tree-id 17 --texture --with-robot --no-room --hold-gui
 
 Rollback to v2 meshes: re-run export_pybullet_tree_v2.py for the same --tree-id.

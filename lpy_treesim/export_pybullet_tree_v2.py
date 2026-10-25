@@ -25,7 +25,7 @@ Example:
 
     python lpy_treesim/export_pybullet_tree_v2.py --range 0-4 --regenerate-urdf
 
-    PYTHONPATH=. python feature_apple_path_planning/playground/tests/run_sim_tree_viewer.py \\
+    python tools/tree_viewers/run_sim_tree_viewer.py \\
         --tree-id 12 --texture --preserve-export-mtl --hold-gui
 """
 

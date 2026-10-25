@@ -47,10 +47,6 @@ class Robot:
     _robot_xacro_path = os.path.join(URDF_PATH, "robot", "generic", "robot.urdf.xacro")
     _urdf_tmp_path = os.path.join(URDF_PATH, "tmp")
 
-    print("----CONFIG_PATH",_robot_configs_path)
-    print("----MESHES_PATH",_robot_xacro_path)
-    print("----URDF_PATH",_urdf_tmp_path)
-
     def __init__(
         self,
         pbclient,
@@ -760,8 +756,8 @@ class Robot:
         # (like "TRUNK", "BRANCH" from CONFIG) to the PyBullet ID of the *whole tree*.
         # Example: {'TRUNK': whole_tree_id, 'BRANCH': whole_tree_id}
         #
-        # Optional lists align with feature_apple_path_planning/run_apple_data_generator.py
-        # planning_config keys acceptable_collision_labels / unacceptable_collision_labels.
+        # Optional acceptable / unacceptable label lists come from the caller's planning config
+        # (keys acceptable_collision_labels / unacceptable_collision_labels).
 
         if acceptable_labels is not None:
             collision_acceptable_list = list(acceptable_labels)

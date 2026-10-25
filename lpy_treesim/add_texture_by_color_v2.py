@@ -3,7 +3,10 @@ Blender script: assign PBR textures per tree component using vertex colors
 from labeled OBJ/PLY exports (Camp_Envy_tie_prune_label6_2.lpy).
 
 Run inside Blender (Scripting workspace) or:
-  blender --background --python add_texture_by_color_v2.py
+  blender --background --python lpy_treesim/add_texture_by_color_v2.py
+
+Paths default to this repository's layout; override with environment variables
+LPY_TEXTURE_INPUT_DIR, LPY_TEXTURE_OUTPUT_DIR and PYBULLET_TREE_SIM_TEXTURES.
 """
 import glob
 import os
@@ -14,11 +17,15 @@ from math import sqrt
 # CONFIG — edit paths and component → texture mapping
 # =============================================================================
 
-TREE_INPUT_DIR = "/home/robben/codes/TreeSim/ok/lpy_treesim/dataset/obj"
-TREE_OUTPUT_DIR = "/home/robben/codes/TreeSim/ok/lpy_treesim/dataset/textured_obj"
+# Repository-relative defaults (Blender's Python cannot import pybullet_tree_sim, so resolve from this file).
+_LPY_DIR = os.path.dirname(os.path.abspath(__file__))
+TREE_INPUT_DIR = os.environ.get("LPY_TEXTURE_INPUT_DIR", os.path.join(_LPY_DIR, "dataset", "obj"))
+TREE_OUTPUT_DIR = os.environ.get("LPY_TEXTURE_OUTPUT_DIR", os.path.join(_LPY_DIR, "dataset", "textured_obj"))
 INPUT_EXT = ".obj"  # ".obj" or ".ply"
 
-TEXTURE_ROOT = "/home/robben/codes/TreeSim/ok/pybullet-tree-sim/pybullet_tree_sim/textures"
+TEXTURE_ROOT = os.environ.get(
+    "PYBULLET_TREE_SIM_TEXTURES", os.path.join(os.path.dirname(_LPY_DIR), "pybullet_tree_sim", "textures")
+)
 
 # Label scheme (Camp_Envy_tie_prune_label6_2.lpy): B-only wood/leaf/stem; apples = 200 label IDs.
 # Levels 51,102,153,204,255: 75 two-channel (one zero) + 125 full RGB.
