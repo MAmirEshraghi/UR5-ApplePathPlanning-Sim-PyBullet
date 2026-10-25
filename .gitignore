@@ -192,7 +192,7 @@ runs/
 *.xacro_old
 
 # Local-only: agent session reports, scratch planner output, local media/textures
-claude_reports/
+session_reports/
 rrt_paths.hdf5
 lpy_treesim/media/
 pybullet_tree_sim/textures/apple2/
