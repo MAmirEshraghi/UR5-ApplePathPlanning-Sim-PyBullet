@@ -29,6 +29,7 @@ from numpy.typing import ArrayLike
 from pybullet_tree_sim import (
     APPLE_COLORS_NORMALIZED,
     RGB_LABEL,
+    GENERATED_URDF_PATH,
     URDF_PATH,
     MESHES_PATH,
     PKL_PATH,
@@ -84,7 +85,7 @@ class Tree:
     """
 
     _tree_xacro_path = os.path.join(URDF_PATH, "trees", "envy", "tree.urdf.xacro")
-    _tree_generated_urdf_path = os.path.join(URDF_PATH, "trees", "envy", "generated")
+    _tree_generated_urdf_path = os.path.join(GENERATED_URDF_PATH, "trees", "envy", "generated")
     _tree_meshes_unlabeled_path = os.path.join(MESHES_PATH, "trees", "envy", "unlabeled", "obj")
     _tree_meshes_labeled_path = os.path.join(MESHES_PATH, "trees", "envy", "labeled", "obj")
     _pkl_path = PKL_PATH
@@ -1559,8 +1560,7 @@ class Tree:
         if not os.path.exists(self.urdf_path):
             log.info(f"Could not find file '{self.urdf_path}'. Generating URDF from xacro.")
 
-            if not os.path.isdir(Tree._tree_generated_urdf_path):
-                os.mkdir(Tree._tree_generated_urdf_path)
+            os.makedirs(Tree._tree_generated_urdf_path, exist_ok=True)
 
             _tree_id = str(self.tree_id).zfill(5)
             use_visual_material = not self.has_textured_export_mtl(

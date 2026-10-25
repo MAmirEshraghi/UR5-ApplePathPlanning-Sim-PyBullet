@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from pybullet_tree_sim import PROJECT_PATH
+from pybullet_tree_sim import MESHES_PATH
 
 import os
 import requests
@@ -7,8 +7,7 @@ from tqdm import tqdm
 import zipfile
 
 
-proj_src_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(PROJECT_PATH)))))
-meshes_path = os.path.join(proj_src_path, "pybullet_tree_sim", "meshes")
+meshes_path = MESHES_PATH  # follows PYBULLET_TREE_SIM_DATA; was derived from a site-packages-only folder depth
 
 
 def get_filename_from_url(url: str) -> str:

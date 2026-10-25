@@ -3,11 +3,19 @@ import os
 PROJECT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__)))
 
 
-# Global URDF path pointing to robot and supports URDFs
-PKL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "pkl"))
-MESHES_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "meshes"))
+# Root for large and generated files: downloaded meshes, point caches (pkl), textures and generated
+# URDFs. Defaults to the package directory (upstream layout). Set PYBULLET_TREE_SIM_DATA when the
+# package is installed read-only, e.g. as a pinned dependency. The root must keep the package layout
+# (meshes/, pkl/, textures/, urdf/) because generated URDF and MTL files reference meshes and
+# textures by relative path.
+DATA_PATH = os.path.abspath(os.environ.get("PYBULLET_TREE_SIM_DATA", PROJECT_PATH))
+PKL_PATH = os.path.join(DATA_PATH, "pkl")
+MESHES_PATH = os.path.join(DATA_PATH, "meshes")
+TEXTURES_PATH = os.path.join(DATA_PATH, "textures")
+GENERATED_URDF_PATH = os.path.join(DATA_PATH, "urdf")  # generated tree URDFs (robot.urdf stays in URDF_PATH/tmp: needs ROS to regenerate)
+
+# Global URDF path pointing to robot and supports URDFs (xacro sources shipped with the package)
 URDF_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "urdf"))
-TEXTURES_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "textures"))
 ROBOT_URDF_PATH = os.path.join(URDF_PATH, "ur5e", "ur5e_cutter_new_calibrated_precise_level.urdf")
 CONFIG_PATH = os.path.join(os.path.join(os.path.dirname(__file__), "config"))
 CAMERAS_PATH = os.path.join(CONFIG_PATH, "cameras")
