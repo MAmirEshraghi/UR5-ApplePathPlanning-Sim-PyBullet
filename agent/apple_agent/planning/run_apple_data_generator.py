@@ -45,11 +45,9 @@ import json
 import sys
 from pathlib import Path
 
-from apple_agent.envs.apple_picking_env import (
-    ApplePickingEnv,
-    resolve_preserve_export_mtl,
-)
-from apple_agent.planning.viz_debug import (
+from apple_agent.envs.apple_picking_env import ApplePickingEnv
+from pybullet_tree_sim.utils.tree_loading import resolve_preserve_export_mtl
+from pybullet_tree_sim.utils.viz_debug import (
     apple_marker_surface_position,
     draw_debug_sphere,
     gui_refresh,
