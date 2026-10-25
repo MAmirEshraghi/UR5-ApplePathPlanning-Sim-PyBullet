@@ -67,7 +67,7 @@ def _apply_tree_setup_for_training(config: dict, run_id: str, agent_data_path: P
     """
     Patch config tree_setup from the waypoints run (preferred) or agent-data metadata.
 
-    Matches generate_agent_data_from_waypoints_2.py so ApplePickingEnv loads the same tree
+    Matches generate_expert_data.py so ApplePickingEnv loads the same tree
     as the expert trajectories (tree_id, scale, pose).
     """
     waypoints_path = Path("output") / "waypoints" / f"{run_id}.hdf5"

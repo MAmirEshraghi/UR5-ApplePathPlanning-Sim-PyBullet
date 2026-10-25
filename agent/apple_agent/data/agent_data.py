@@ -32,7 +32,7 @@ def check_schema(grp: h5py.Group) -> None:
     if version != SCHEMA_VERSION:
         raise ValueError(
             f"{grp.file.filename}:{grp.name} has agent-data schema v{version}, expected v{SCHEMA_VERSION}. "
-            "Regenerate it with python -m apple_agent.data.generate_agent_data_from_waypoints_2."
+            "Regenerate it with python -m apple_agent.data.generate_expert_data."
         )
 
 

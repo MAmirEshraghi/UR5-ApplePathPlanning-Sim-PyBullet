@@ -1529,7 +1529,7 @@ def run_generator_stage(run_id=None):
     mis-scaled cached flow). Use the schema-v2 generator instead."""
     log.error(
         "--stage generator was removed. Run: python -m apple_agent.data."
-        "generate_agent_data_from_waypoints_2 --run-id %s --save-only-success", run_id or "<run_id>",
+        "generate_expert_data --run-id %s", run_id or "<run_id>",
     )
     sys.exit(2)
 

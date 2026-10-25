@@ -45,7 +45,7 @@ This is the main executable script for the data generation pipeline. It uses com
 
 - Planner (Stage 1): Loads the simulation, finds apples, and uses RRT-Connect to plan collision-free paths to them, saving the paths to ```rrt_paths.hdf5```.
 
-- Generator (Stage 2): moved to ```apple_agent/data/generate_agent_data_from_waypoints_2.py``` (see Stage 2 below); `--stage generator` now exits with that pointer.
+- Generator (Stage 2): moved to ```apple_agent/data/generate_expert_data.py``` (see Stage 2 below); `--stage generator` now exits with that pointer.
 
 - Visualization: Loads and replays the saved RRT paths in the PyBullet GUI for visual inspection.
 
@@ -75,7 +75,7 @@ python -m apple_agent.planning.run_apple_data_generator --stage planner
 Loads the planner waypoints (`output/waypoints/<run_id>.hdf5`), refines them and executes them with a closed-loop Jacobian controller in `ApplePickingEnv` (DIRECT mode, same renderer as training). Each trajectory is saved in agent-data schema v2 (`apple_agent/data/agent_data.py`): every frame once (rgb, depth in mm, apple mask, proprio, `pregrasp_in_tool`), plus actions, rewards and env terminal/truncated flags. Then validate the file before training:
 
 ```
-python -m apple_agent.data.generate_agent_data_from_waypoints_2 --run-id tree08 --path-rank 1 --out-id tree08_rank1_v2 --save-only-success
+python -m apple_agent.data.generate_expert_data --run-id tree08 --path-rank 1 --out-id tree08_rank1_v2 --save-only-success
 python -m apple_agent.data.validate_agent_data --run-id tree08_rank1_v2 --policy-smoke --replay 2
 ```
 
@@ -104,7 +104,7 @@ repository later, with the simulator installed as a pinned dependency (see `agen
 # from the repository root (the workspace), venv activated
 export PYTHONPATH=$PWD/agent            # or: pip install -e agent   (and pip install -e . for the simulator)
 python -m apple_agent.planning.run_apple_data_generator --stage planner      # RRT waypoints -> output/waypoints/
-python -m apple_agent.data.generate_agent_data_from_waypoints_2 --run-id tree08 --out-id tree08_v2
+python -m apple_agent.data.generate_expert_data --run-id tree08 --out-id tree08_v2
 python -m apple_agent.data.validate_agent_data --run-id tree08_v2 --policy-smoke --replay 2
 python -m apple_agent.rl.train_apple_picking_expert --run_id tree08_v2 --run_name <name> --image_channels depth,mask
 python -m apple_agent.rl.eval_apple_picking_expert --run_id tree08_v2 --checkpoint logs/<name>/model_20000_steps.zip --eval_all --max_steps 150

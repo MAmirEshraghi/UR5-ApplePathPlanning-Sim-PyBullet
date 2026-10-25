@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-generate_agent_data_from_waypoints_2.py  —  PHYSICS-STEP version
+generate_expert_data.py  —  PHYSICS-STEP version (formerly generate_agent_data_from_waypoints_2.py)
 
 Batch-generate RL agent-data transitions from a pre-planned waypoints HDF5 file.
 
@@ -48,26 +48,26 @@ Why no teleportation between segments?
 
 Run from the workspace root (where output/ and logs/ live), venv activated:
 
-    python -m apple_agent.data.generate_agent_data_from_waypoints_2 \\
+    python -m apple_agent.data.generate_expert_data \\
         --run-id tree08 --path-rank 1 --out-id tree08_rank1_v2 --save-only-success
 
 Process only one group:
 
-    python -m apple_agent.data.generate_agent_data_from_waypoints_2 \\
+    python -m apple_agent.data.generate_expert_data \\
         --run-id 20260504_203032 --group-key <key>
 
 Tip — defaults match the smoother “config 1” baseline (step_scale=0.3, alpha=0.55, dq_cap=0.03).
 
 Experimental longer / stricter correction (optional):
 
-    python -m apple_agent.data.generate_agent_data_from_waypoints_2 \\
+    python -m apple_agent.data.generate_expert_data \\
         --run-id 20260504_203032 \\
         --final-correction-steps 45 \\
         --final-correction-divergence-min-corr-idx 2
 
 Check what was saved:
 
-    python -m apple_agent.data.generate_agent_data_from_waypoints_2 \\
+    python -m apple_agent.data.generate_expert_data \\
         --run-id 20260504_203032 --verify-hdf5
 
 Log is written to:
