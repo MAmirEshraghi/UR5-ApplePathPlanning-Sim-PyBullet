@@ -4,8 +4,19 @@ import random
 import numpy as np
 import torch as th
 from apple_picking_sb3.pruning_gym.callbacks.callbacks import PruningSetGoalCallback
-from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
+from typing import Iterator
+
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
 from stable_baselines3.common.logger import Video
+
+
+def iter_all_callbacks(callback) -> Iterator[BaseCallback]:
+    """Yield every callback, including nested CallbackList (e.g. when progress_bar=True)."""
+    if isinstance(callback, CallbackList):
+        for child in callback.callbacks:
+            yield from iter_all_callbacks(child)
+    else:
+        yield callback
 
 
 class Pruning1TreeSetGoalCallback(PruningSetGoalCallback):
@@ -116,24 +127,37 @@ class PruningTrainRecordEnvCallback(BaseCallback):
 
 
 class PruningCheckpointCallback(CheckpointCallback):
+    _SAVE_EXCLUDE = [
+        "_last_obs", "_last_episode_starts", "_last_original_obs",
+        "expert_buffer", "expert_data", "expert_batch_idx",
+        "rollout_buffer", "expert_batch", "dataset", "data_iter", "dataloader",
+        "ep_info_buffer", "ep_success_buffer", "_last_obs_expert",
+        "_last_lstm_states_expert",
+    ]
+
     def __init__(self, save_freq: int, save_path: str, name_prefix: str = "rl_model", verbose=0):
         super(PruningCheckpointCallback, self).__init__(save_freq, save_path, name_prefix, verbose)
+        self._last_saved_ts = 0
+
+    def _init_callback(self) -> None:
+        super()._init_callback()
+        self._last_saved_ts = (self.model.num_timesteps // self.save_freq) * self.save_freq
+
+    def _save_model_checkpoint(self) -> None:
+        model_path = self._checkpoint_path(extension="zip")
+        self.model.save(model_path, exclude=self._SAVE_EXCLUDE)
+        if self.verbose >= 1:
+            print(f"Saving model checkpoint to {model_path}")
 
     def _on_step(self) -> bool:
         if self.n_calls % self.save_freq == 0:
-            model_path = self._checkpoint_path(extension="zip")
-            
-            self.model.save(model_path, exclude=["_last_obs", "_last_episode_starts", "_last_original_obs"
-                                                 "expert_buffer", "expert_data", "expert_batch_idx",
-                                                 "rollout_buffer", "expert_batch", "dataset", "data_iter", "dataloader",
-                                                 '_last_original_obs', "ep_info_buffer", "ep_success_buffer", "_last_obs_expert",
-                                                    "_last_lstm_states_expert", "rollout_buffer", "expert_buffer"])
-            if self.verbose >= 1:
-                print(f"Saving model checkpoint to {model_path}")
-            # mean_std_path = self._checkpoint_path(checkpoint_type="mean_std_", extension="pkl")
-            # with open(mean_std_path, "wb") as f:
-            #     pickle.dump((self.model.policy.running_mean_var_oflow_x, self.model.policy.running_mean_var_oflow_y), f)
-            if self.verbose >= 2:
-                print(f"Saving model checkpoint to {model_path}")
-
+            self._save_model_checkpoint()
         return True
+
+    def maybe_save_timestep_milestone(self) -> None:
+        """Save when num_timesteps crosses save_freq boundaries (bc_only has no env steps)."""
+        ts = self.model.num_timesteps
+        while self._last_saved_ts + self.save_freq <= ts:
+            self._last_saved_ts += self.save_freq
+            self.num_timesteps = self._last_saved_ts
+            self._save_model_checkpoint()

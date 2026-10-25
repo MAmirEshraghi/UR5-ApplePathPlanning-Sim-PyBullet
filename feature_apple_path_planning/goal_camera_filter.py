@@ -220,8 +220,9 @@ def evaluate_goal_camera_filter_method_a(
     cfg
         ``goal_camera_filter`` dict from planning CONFIG. Expected keys:
         min_visible_frac, color_rgb_lower, color_rgb_upper, sphere_radius_m,
-        disk_radius_scale, sim_settle_steps,
+        disk_radius_scale, sim_settle_steps, num_camera_filtered_goal_candidates_to_try,
         log_projection_debug (enable ``log.debug`` projection lines and extra INFO fields).
+        RRT cap is enforced in run_apple_data_generator planner loop (not here).
     debug
         When set, writes step PNGs under ``debug.output_dir`` (s01 rgb, s02 projection, s03 disk).
     """

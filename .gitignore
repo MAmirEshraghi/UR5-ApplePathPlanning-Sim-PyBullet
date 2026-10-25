@@ -181,3 +181,12 @@ logs/
 output/
 
 
+
+# local junk
+*~
+Untitled*
+*copy.py
+*.blend
+*.mov
+runs/
+*.xacro_old

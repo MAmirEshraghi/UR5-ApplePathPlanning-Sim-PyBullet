@@ -179,6 +179,7 @@ def log_memory(phase: str, num_timesteps: Optional[int] = None) -> Tuple[Optiona
 
 def _summarize_expert_hdf5(hdf5_path: Path) -> dict:
     """Read expert HDF5 once for [train:data] startup lines."""
+    tree_counts: dict[str, int] = {}
     with h5py.File(hdf5_path, "r") as f:
         keys = list(f.keys())
         step_counts: list[int] = []
@@ -188,6 +189,11 @@ def _summarize_expert_hdf5(hdf5_path: Path) -> dict:
                 step_counts.append(int(grp["actions"].shape[0]))
             elif "rewards" in grp:
                 step_counts.append(int(grp["rewards"].shape[0]))
+            tid = grp.attrs.get("tree_id_str")
+            if tid is None:
+                raw = grp.attrs.get("tree_id")
+                tid = f"tree_id={int(np.asarray(raw).reshape(-1)[0])}" if raw is not None else "unknown"
+            tree_counts[str(tid)] = tree_counts.get(str(tid), 0) + 1
         ref = f[keys[0]] if keys else None
         tree_id_str = str(ref.attrs.get("tree_id_str", "")) if ref is not None else ""
         tree_scale = float(ref.attrs.get("tree_scale", 0.0)) if ref is not None else 0.0
@@ -199,6 +205,7 @@ def _summarize_expert_hdf5(hdf5_path: Path) -> dict:
         "step_mean": float(steps.mean()) if steps.size else 0.0,
         "tree_id_str": tree_id_str,
         "tree_scale": tree_scale,
+        "tree_counts": tree_counts,
         "size_mb": hdf5_path.stat().st_size / (1024 * 1024),
     }
 
@@ -219,6 +226,14 @@ def _log_train_data(hdf5_path: Path, training_config: dict) -> None:
         f"pos={np.round(np.asarray(tree.get('position', [0, 0, 0])), 4).tolist()}",
         flush=True,
     )
+    tree_counts = summary.get("tree_counts", {})
+    if len(tree_counts) > 1:
+        spread = "  ".join(f"{k}:{v}" for k, v in sorted(tree_counts.items()))
+        print(
+            f"[train:data] MULTI-TREE dataset: {len(tree_counts)} trees  ({spread}). "
+            f"Per-episode tree is taken from each trajectory's metadata (reconfigure_scene).",
+            flush=True,
+        )
 
 
 def _log_train_config(
@@ -234,7 +249,7 @@ def _log_train_config(
 ) -> None:
     sim = training_config.get("simulation_setup", {})
     print(
-        f"[train:config] run_id={args.run_id} log_file={log_path} "
+        f"[train:config] run_name={run_name} run_id={args.run_id} log_file={log_path} "
         f"total_timesteps={total_timesteps} progress_bar={args.progress_bar} "
         f"memory_debug={args.memory_debug}",
         flush=True,
@@ -262,9 +277,83 @@ def _log_train_config(
     )
     print(
         "[train:config] log_groups: [train:init] [train:data] [train:episode] "
-        "[train:rollout] [train:summary] [train:mem]",
+        "[train:rollout] [train:summary] [train:mem] [train:tier1]",
         flush=True,
     )
+    load_ckpt = getattr(args, "load_checkpoint", None)
+    print(
+        f"[train:config] tier1 load_checkpoint={load_ckpt} bc_warmup_steps={args.bc_warmup_steps} "
+        f"bc_coeff_warmup={args.bc_coeff_warmup} bc_coeff_after={args.bc_coeff} "
+        f"ent_coef_warmup={args.ent_coef_warmup} ent_coef_after={train_kwargs['ent_coef']}",
+        flush=True,
+    )
+    print(f"[train:config] bc_only={args.bc_only}", flush=True)
+    ckpt_freq = getattr(args, "checkpoint_freq", None)
+    print(
+        f"[train:config] checkpoint_freq={ckpt_freq} "
+        f"({'final only' if ckpt_freq is None else f'save every {ckpt_freq} steps'})",
+        flush=True,
+    )
+    print(
+        f"[train:config] use_cached_optical_flow={args.use_cached_optical_flow} "
+        f"({'HDF5 saved flow' if args.use_cached_optical_flow else 'live RAFT on rgb — aligned with eval/PPO'})",
+        flush=True,
+    )
+
+
+class BcWarmupCallback(BaseCallback):
+    """#tier1-30k: BC-heavy early phase — 30k run had good bc_loss but online collisions / unstable success."""
+
+    def __init__(
+        self,
+        warmup_steps: int,
+        bc_coeff_warmup: float,
+        bc_coeff_after: float,
+        ent_coef_warmup: float,
+        ent_coef_after: float,
+        verbose: int = 0,
+    ):
+        super().__init__(verbose)
+        self.warmup_steps = max(0, int(warmup_steps))
+        self.bc_coeff_warmup = bc_coeff_warmup
+        self.bc_coeff_after = bc_coeff_after
+        self.ent_coef_warmup = ent_coef_warmup
+        self.ent_coef_after = ent_coef_after
+        self._post_warmup_logged = False
+
+    def _apply_coeffs(self, bc_coeff: float, ent_coef: float) -> None:
+        if self.model is None:
+            return
+        self.model.bc_coeff = bc_coeff
+        self.model.ent_coef = ent_coef
+
+    def _on_training_start(self) -> None:
+        if self.warmup_steps <= 0 or self.num_timesteps >= self.warmup_steps:
+            self._apply_coeffs(self.bc_coeff_after, self.ent_coef_after)
+            return
+        self._apply_coeffs(self.bc_coeff_warmup, self.ent_coef_warmup)
+        if self.verbose > 0:
+            print(
+                f"[train:tier1] BC warmup until t={self.warmup_steps} "
+                f"bc_coeff={self.bc_coeff_warmup} ent_coef={self.ent_coef_warmup}",
+                flush=True,
+            )
+
+    def _on_step(self) -> bool:
+        if self.warmup_steps <= 0:
+            return True
+        if self.num_timesteps < self.warmup_steps:
+            self._apply_coeffs(self.bc_coeff_warmup, self.ent_coef_warmup)
+        elif not self._post_warmup_logged:
+            self._apply_coeffs(self.bc_coeff_after, self.ent_coef_after)
+            self._post_warmup_logged = True
+            if self.verbose > 0:
+                print(
+                    f"[train:tier1] BC warmup done t={self.num_timesteps} "
+                    f"bc_coeff={self.bc_coeff_after} ent_coef={self.ent_coef_after}",
+                    flush=True,
+                )
+        return True
 
 
 class MemoryDebugCallback(BaseCallback):
@@ -468,15 +557,19 @@ class ApplePickingImitationCallback(BaseCallback):
                 self._active_traj_keys = [None] * n_envs
                 self._ep_return = [0.0] * n_envs
                 start_key = self._reset_to_expert_trajectory(env_idx=0)
-                if start_key is not None:
-                    self._active_traj_keys[0] = start_key
-                if self.verbose > 0 and start_key is not None:
+                if start_key is None:
+                    raise RuntimeError(
+                        "failed to reconfigure env to expert trajectory at training start"
+                    )
+                self._active_traj_keys[0] = start_key
+                if self.verbose > 0:
                     print(
                         f"[train:init] initial_scene traj={start_key} t=0",
                         flush=True,
                     )
         except Exception as e:
-            print(f"[train:init] error loading HDF5 {self.hdf5_path}: {e}")
+            print(f"[train:init] error loading HDF5 {self.hdf5_path}: {e}", flush=True)
+            raise
 
     def _reset_to_expert_trajectory(
         self, trajectory_key: Optional[str] = None, env_idx: int = 0
@@ -547,6 +640,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train apple-picking expert policy with PPO + imitation.")
     parser.add_argument("--run_id", required=True, help="Run ID corresponding to output/agent_data/{run_id}.hdf5")
     parser.add_argument(
+        "--run_name",
+        default="apple_picking_imit_run_final",
+        help="Subdir under logs/ and runs/ for checkpoints and tensorboard "
+        "(default: apple_picking_imit_run_final).",
+    )
+    parser.add_argument(
         "--log_file",
         default=None,
         help="Append full stdout/stderr session to this file. Default: logs/train_apple_picking_expert/<ts>_<run_id>.log",
@@ -566,13 +665,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--total_timesteps",
         type=int,
-        default=4086,
+        default=50000,
         help="Training length in env steps. Default 2048 (~1h smoke); was hardcoded 10_000 (~4h).",
     )
     parser.add_argument(
         "--bc_coeff",
         type=float,
-        default=1.5,
+        default=2.0,
         help="BC loss multiplier. Default 1.5; was 0.6.",
     )
     parser.add_argument(
@@ -580,6 +679,55 @@ if __name__ == "__main__":
         action=argparse.BooleanOptionalAction,
         default=False,
         help="Live tqdm bar in terminal only (filtered from log). Default: off.",
+    )
+    parser.add_argument(
+        "--checkpoint_freq",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Save model every N timesteps (e.g. 5000). Omit for final-only save.",
+    )
+    # #tier1-30k: resume + BC warmup after collision-heavy 30k run (success spikes then regressed)
+    parser.add_argument(
+        "--load_checkpoint",
+        default=None,
+        help="Resume from .zip checkpoint (e.g. logs/apple_picking_imit_run_final/model_15000_steps.zip).",
+    )
+    parser.add_argument(
+        "--bc_warmup_steps",
+        type=int,
+        default=15000,
+        help="Steps with high BC / zero entropy before normal mixed training (tier 1).",
+    )
+    parser.add_argument(
+        "--bc_coeff_warmup",
+        type=float,
+        default=3.0,
+        help="bc_coeff during warmup (tier 1). Default 3.0; after warmup uses --bc_coeff.",
+    )
+    parser.add_argument(
+        "--ent_coef_warmup",
+        type=float,
+        default=0.0,
+        help="ent_coef during warmup (tier 1). Default 0 — less online noise while BC catches up.",
+    )
+    parser.add_argument(
+        "--bc_only",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Expert BC only: no sim rollouts, no PPO backward (use_online_bc still loads expert HDF5).",
+    )
+    parser.add_argument(
+        "--use_cached_optical_flow",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="BC vision: True=read optical_flow from HDF5; False=live RAFT on rgb/prev_rgb (matches eval/PPO).",
+    )
+    parser.add_argument(
+        "--renders",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="PyBullet GUI during sim rollouts (default: off, DIRECT mode).",
     )
     args = parser.parse_args()
 
@@ -613,7 +761,7 @@ if __name__ == "__main__":
             raise FileNotFoundError(f"Agent data file not found: {expert_data_path}")
 
         # --- Basic Configuration ---
-        run_name = "apple_picking_imit_run_final"
+        run_name = args.run_name
         n_envs = 1
         total_timesteps = args.total_timesteps
         expert_data_filepath = str(expert_data_path.resolve())
@@ -622,7 +770,8 @@ if __name__ == "__main__":
             **APPLE_PICKING_CONFIG,
             "simulation_setup": {
                 **APPLE_PICKING_CONFIG["simulation_setup"],
-                "renders": False,  # DIRECT mode — much lower RAM, no GUI leak
+                "renders": args.renders,
+                "draw_apple_centroid_markers": True,
                 "terminate_on_self_collision": True,  # was False — align with expert data gen default
             },
         }
@@ -639,18 +788,37 @@ if __name__ == "__main__":
 
         #env = VecTransposeImage(env)
 
-        new_logger = utils.configure_logger(verbose=1, tensorboard_log=f"./runs/{run_name}", reset_num_timesteps=True)
+        resuming = args.load_checkpoint is not None
+        new_logger = utils.configure_logger(
+            verbose=1,
+            tensorboard_log=f"./runs/{run_name}",
+            reset_num_timesteps=not resuming,
+        )
 
         # --- Callbacks ---
+        bc_warmup_callback = BcWarmupCallback(
+            warmup_steps=args.bc_warmup_steps,
+            bc_coeff_warmup=args.bc_coeff_warmup,
+            bc_coeff_after=args.bc_coeff,
+            ent_coef_warmup=args.ent_coef_warmup,
+            ent_coef_after=0.001,
+            verbose=1,
+        )
         imitation_callback = ApplePickingImitationCallback(
             hdf5_path=expert_data_filepath,
             verbose=1,
             memory_debug=args.memory_debug,
         )
-        checkpoint_callback = PruningCheckpointCallback(save_freq=10000,  # More frequent checkpoints
-                                                        save_path=f"./logs/{run_name}",
-                                                        name_prefix="model", verbose=1)
-        callback_list = [imitation_callback, checkpoint_callback]
+        callback_list = [bc_warmup_callback, imitation_callback]
+        if args.checkpoint_freq is not None:
+            callback_list.append(
+                PruningCheckpointCallback(
+                    save_freq=args.checkpoint_freq,
+                    save_path=f"./logs/{run_name}",
+                    name_prefix="model",
+                    verbose=1,
+                )
+            )
         if args.memory_debug:
             callback_list.insert(
                 0,
@@ -670,17 +838,15 @@ if __name__ == "__main__":
             'log_std_init': -1.5,  # was 0.0 (std≈1.0) — closer to expert Jacobian action scale
         }
 
-        # The RecurrentPPOAEWithExpert model from the pruning project is now fully compatible
-        print("INFO: Building PPO+BC model (loads expert dataset)…", flush=True)
         train_kwargs = dict(
             learning_rate=1e-4,
             n_steps=512,
             batch_size=16,
-            n_epochs=1,
+            n_epochs=2,
             gamma=0.99,
             gae_lambda=0.95,
             clip_range=0.2,
-            ent_coef=0.001,
+            ent_coef=0.001,  # #tier1-30k: overridden to 0 during bc_warmup_steps via BcWarmupCallback
             vf_coef=0.25,
             max_grad_norm=0.5,
             use_online_data=False,
@@ -690,19 +856,72 @@ if __name__ == "__main__":
             use_awac=False,
             device="cuda",
         )
-        model = RecurrentPPOAEWithExpert(
-            policy=RecurrentActorCriticPolicy,
-            env=env,
-            path_trajectories=os.path.abspath(expert_data_filepath),
-            bc_coeff=args.bc_coeff,
+        expert_path = os.path.abspath(expert_data_filepath)
+        load_flags = dict(
+            use_online_data=False,
+            use_offline_data=False,
+            use_ppo_offline=False,
+            use_online_bc=True,
+            use_awac=False,
+            path_trajectories=expert_path,
             algo_size=(224, 224),
-            use_cached_optical_flow=True,
-            policy_kwargs=policy_kwargs,
-            verbose=1,
-            tensorboard_log=f"./runs/{run_name}",
-            **train_kwargs,
+            use_cached_optical_flow=args.use_cached_optical_flow,
+            bc_only=args.bc_only,
+            device="cuda",
         )
+        if resuming:
+            load_path = Path(args.load_checkpoint).resolve()
+            if not load_path.is_file():
+                raise FileNotFoundError(f"Checkpoint not found: {load_path}")
+            print(f"INFO: Resuming from checkpoint {load_path} (t={load_path.stem})…", flush=True)
+            model = RecurrentPPOAEWithExpert.load(str(load_path), env=env, **load_flags)
+            model.bc_only = args.bc_only
+            if args.bc_only:
+                model.collect_online_data = False
+            else:
+                model.collect_online_data = (
+                    model.use_online_data
+                    or model.use_ppo_offline
+                    or model.use_online_bc
+                    or model.use_awac
+                )
+            print(
+                f"[train:config] resumed bc_only={model.bc_only} "
+                f"collect_online_data={model.collect_online_data} "
+                f"expert_bc_hdf5={model.path_trajectories} "
+                f"use_cached_optical_flow={model.use_cached_optical_flow} "
+                f"num_timesteps={model.num_timesteps}",
+                flush=True,
+            )
+            # Warmup callback sets bc_coeff/ent_coef on training_start from current num_timesteps
+            model.bc_coeff = (
+                args.bc_coeff_warmup
+                if model.num_timesteps < args.bc_warmup_steps
+                else args.bc_coeff
+            )
+            model.ent_coef = (
+                args.ent_coef_warmup
+                if model.num_timesteps < args.bc_warmup_steps
+                else train_kwargs["ent_coef"]
+            )
+        else:
+            print("INFO: Building PPO+BC model (loads expert dataset)…", flush=True)
+            model = RecurrentPPOAEWithExpert(
+                policy=RecurrentActorCriticPolicy,
+                env=env,
+                path_trajectories=expert_path,
+                bc_coeff=args.bc_coeff_warmup,  # #tier1-30k: warmup starts high; callback holds until bc_warmup_steps
+                algo_size=(224, 224),
+                use_cached_optical_flow=args.use_cached_optical_flow,
+                policy_kwargs=policy_kwargs,
+                verbose=1,
+                tensorboard_log=f"./runs/{run_name}",
+                bc_only=args.bc_only,
+                **train_kwargs,
+            )
+            model.ent_coef = args.ent_coef_warmup
 
+        model.policy.use_cached_optical_flow = model.use_cached_optical_flow
         model.set_logger(new_logger)
         if args.memory_debug:
             log_memory("after_model")
@@ -732,6 +951,7 @@ if __name__ == "__main__":
             total_timesteps=total_timesteps,
             callback=callback_list,
             progress_bar=args.progress_bar,
+            reset_num_timesteps=not resuming,
         )
 
         if args.memory_debug:

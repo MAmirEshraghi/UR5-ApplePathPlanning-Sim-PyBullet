@@ -23,12 +23,12 @@ from zenlog import log
 
 def create_room_backdrop(pbclient, *, collision: bool = False) -> list[int]:
     """Create textured room box (floor + walls + ceiling). Returns body ids."""
-    wall_texture_path = os.path.join(TEXTURES_PATH, "leaves-dead.png")
-    tex_id = pbclient.loadTexture(wall_texture_path)
+    floor_tex = pbclient.loadTexture(os.path.join(TEXTURES_PATH, "leaves-dead.png"))
+    wall_tex = pbclient.loadTexture(os.path.join(TEXTURES_PATH, "sky.png"))
     if not collision:
         log.info("Room backdrop: visual-only (no wall/floor collision for planning)")
 
-    def _wall(wall_dim, wall_pos, euler_rotation):
+    def _wall(wall_dim, wall_pos, euler_rotation, texture_id):
         wall_viz = pbclient.createVisualShape(
             shapeType=pbclient.GEOM_BOX,
             halfExtents=wall_dim,
@@ -51,17 +51,17 @@ def create_room_backdrop(pbclient, *, collision: bool = False) -> list[int]:
         pbclient.changeVisualShape(
             objectUniqueId=wall_id,
             linkIndex=-1,
-            textureUniqueId=tex_id,
+            textureUniqueId=texture_id,
             rgbaColor=[1.0, 1.0, 1.0, 1.0],
         )
         return wall_id
 
     return [
-        _wall([0.01, 5, 5], [0, 0, 0], [0, np.pi / 2, 0]),
-        _wall([0.01, 5, 5], [0, -2, 5], [np.pi / 2, 0, np.pi / 2]),
-        _wall([0.01, 5, 5], [-5, 0, 5], [0, 0, 0]),
-        _wall([0.01, 5, 5], [5, 0, 5], [0, 0, 0]),
-        _wall([0.01, 5, 5], [0, 0, 10], [0, np.pi / 2, 0]),
+        _wall([0.01, 5, 5], [0, 0, 0], [0, np.pi / 2, 0], floor_tex),
+        _wall([0.01, 5, 5], [0, -2, 5], [np.pi / 2, 0, np.pi / 2], wall_tex),
+        _wall([0.01, 5, 5], [-5, 0, 5], [0, 0, 0], wall_tex),
+        _wall([0.01, 5, 5], [5, 0, 5], [0, 0, 0], wall_tex),
+        _wall([0.01, 5, 5], [0, 0, 10], [0, np.pi / 2, 0], wall_tex),
     ]
 
 

@@ -56,10 +56,10 @@ from feature_apple_path_planning.apple_picking_env import (
 )
 from feature_apple_path_planning.viz_debug import (
     apple_marker_surface_position,
-    change_sphere_color,
     draw_debug_sphere,
     gui_refresh,
     log_apple_marker_batch,
+    replace_debug_sphere,
 )
 from feature_apple_path_planning.goal_camera_filter import (
     GoalCameraFilterDebugContext,
@@ -103,7 +103,7 @@ CONFIG = {
         'renders': True,
         'gravity': -9.81,
         'control_time': 1.0 / 20.0,
-        'max_steps': 600,
+        'max_steps': 350,
         # GUI: frame tree like run_sim_tree_viewer.py (PyBUtils defaults target the robot)
         'frame_tree_camera': True,
         'debug_camera_distance': 0.8,
@@ -111,25 +111,25 @@ CONFIG = {
         'debug_camera_pitch': -22,
         'debug_camera_target_z_offset': 1.0,
         # Env red spheres at apple centroids; planner also draws goal markers separately
-        'draw_apple_centroid_markers': True,
+        'draw_apple_centroid_markers': False,
         # stepSimulation after creating debug bodies so the GUI updates
         'gui_refresh_steps': 1,
         # Backdrop boxes are visual-only unless True (planner ignores walls anyway)
         'room_collision': False,
     },
     'robot_setup': {
-        'start_position': [0, 1.3, 0],
+        'start_position': [0, 1.2, 0],
         'start_orientation_euler_deg': [0, 0, 180],
         'start_joint_angles': [-1.978, -1.51, 2.622, -1.896, 0.579, 0.848],
         # None = use pybullet_tree_sim/urdf/tmp/robot.urdf if present (no ROS ament_index_python)
         'regenerate_urdf': None,
     },
     'tree_setup': {
-        'tree_id': 2,
+        'tree_id': 0,
         'tree_type': "envy",
         'tree_namespace': "LPy",
-        'scale': 0.6,
-        'position': np.array([0.5, 0, 0]),
+        'scale': 0.7,
+        'position': np.array([0.3, 0, 0]),
         'orientation': np.array([0, 0, 0, 1]),
         # v2 export: multi-material OBJ/MTL + parts URDF (see run_sim_tree_viewer.py)
         'apply_texture': True,
@@ -141,11 +141,11 @@ CONFIG = {
     'planning': {
         'max_ee_velocity': 0.25,
         'rrt_max_iterations': 3000,
-        'rrt_max_time': 180.0,
+        'rrt_max_time': 90.0,
         'planner_type': 'rrt_star', #'rrt_star', #'rrt_connect',
         'rrt_radius': 0.4,
-        'num_goal_candidates_to_try': 3,
-        'goal_position_offset': 0.25,
+        'num_goal_candidates_to_try': 200,
+        'goal_position_offset': 0.2,
         # Single source for (1) IK FK acceptance, (2) ApplePickingEnv success radius (distance_threshold),
         # (3) HDF5 attr success_pos_tolerance_m. Keep one value unless you intentionally split IK vs success.
         'fk_pos_tolerance': 0.06,  # relaxed from 0.05 — physics sim drifts ~6 mm short in rollout
@@ -155,8 +155,8 @@ CONFIG = {
         'collision_labels': ["TRUNK", "BRANCH", "APPLE", "LEAF", "SPUR", "STEM", "WATER_BRANCH"],
         'acceptable_collision_labels': [],
         'unacceptable_collision_labels': ["TRUNK", "BRANCH", "APPLE", "SPUR", "LEAF", "STEM", "WATER_BRANCH", "UNKNOWN_KDTREE_UNAVAILABLE", "UNKNOWN_KDTREE_QUERY_ERROR", "UNKNOWN_TOO_FAR", "UNKNOWN_NO_CLOSE_VERTEX"],
-        'orientation_seed': 3,
-        'visibility_seed': 3,
+        'orientation_seed': 44,
+        'visibility_seed': 44,
         'enable_smoothing': True,
         'task_space_refinement_threshold': 0.012,
         # Pick best RRT candidate: joint_length + w_smooth*smoothness + w_task*task_regression (see below).
@@ -165,6 +165,8 @@ CONFIG = {
         'path_selection_task_regression_weight': 0.15,
         # Run shortcut + task-space refine before writing waypoints to HDF5 (matches generator).
         'save_refined_waypoints_to_hdf5': True,
+        # Save up to N best RRT paths per apple as separate HDF5 groups (1 = legacy single-best).
+        'num_top_paths_to_save_per_apple': 2,
         'visibility_check': {
             'enable': False,
             'debug_view': True,
@@ -180,18 +182,21 @@ CONFIG = {
         # Pre-RRT only: at q_goal, require enough "apple blue" inside projected disk (Method A).
         # Independent of visibility_check in is_state_valid_fn.
         'goal_camera_filter': {
-            'enable': False,
-            'min_visible_frac': 0.65,
+            'enable': True,
+            # When enable=True: RRT runs only on up to this many filter-passed IK goals.
+            # Raise planning.num_goal_candidates_to_try (IK pool, e.g. 200) separately.
+            'num_camera_filtered_goal_candidates_to_try': 5,
+            'min_visible_frac': 0.85,
             # RGB image order matches robot.get_rgbd (RGB not BGR).
             'color_rgb_lower': (0, 0, 140),
             'color_rgb_upper': (100, 100, 255),
-            'sphere_radius_m': 0.1, #0.05,
-            'disk_radius_scale': 1.15,
+            'sphere_radius_m': 0.052, 
+            'disk_radius_scale': 1.0,
             'sim_settle_steps': 1,
             # Extra GOAL_CAM_FILTER fields + log.debug lines (NDC, eye, apple, clip_w).
             'log_projection_debug': True,
             # When True, save s01/s02/s03 PNGs under logs/goal_camera_filter/<run_id>/.
-            'save_debug_images': True,
+            'save_debug_images': False,
             'debug_subdir': 'goal_camera_filter',
         },
     },
@@ -200,16 +205,19 @@ CONFIG = {
     },
     'visualization': {
         'draw_goal_spheres': True,
-        'goal_sphere_radius': 0.035,
+        'goal_sphere_radius': 0.042,
         # Push marker spheres outside apple mesh toward robot (meters)
         'apple_marker_surface_offset_m': 0.0,
         'centroid_marker_color': [0.9, 0.08, 0.08, 0.9],
         'goal_sphere_color': [1.0, 0.0, 0.0, 0.8],
         'active_apple_color': [0.0, 0.0, 1.0, 0.9],
+        'active_apple_sphere_radius': 0.053,
+        'pregrasp_marker_color': [0.0, 1.0, 1.0, 0.9],
+        'pregrasp_sphere_radius': 0.04,
         'draw_goal_frames': True,
         'goal_frame_length': 0.09,
         'path_visualization_delay': 0.1,
-        'delay_between_apple_attempts': 0.01,
+        'delay_between_apple_attempts': 0.05,
         'draw_collision_item_aabbs': True,
         'collision_item_aabb_color': [0.0, 0.0, 1.0, 0.5],
         'visualize_actual_collision_points': True,
@@ -1126,34 +1134,43 @@ def _planner_path_selection_tuple(
     return (cost, n_wp, jl, task_reg)
 
 
-def _planner_path_is_better(
-    candidate_path,
-    best_info: dict | None,
+def _planner_path_rank_key(pick_tuple: tuple[float, int, float, float]) -> tuple[float, int, float]:
+    """Lexicographic sort key; lower is better (cost, n_wp, joint_len)."""
+    return (pick_tuple[0], pick_tuple[1], pick_tuple[2])
+
+
+def _insert_top_planner_path(
+    top_paths: list[dict],
+    path,
+    goal_pos,
+    goal_orn,
+    max_k: int,
     smoothness_weight: float,
     robot,
-    candidate_goal_pos,
     task_regression_weight: float,
-) -> bool:
-    if best_info is None:
-        return True
-    t_new = _planner_path_selection_tuple(
-        candidate_path,
-        smoothness_weight,
-        robot,
-        candidate_goal_pos,
-        task_regression_weight,
+) -> int:
+    """Keep up to max_k best paths (sorted best-first). Returns 1-based rank if kept, else 0."""
+    pick_tuple = _planner_path_selection_tuple(
+        path, smoothness_weight, robot, goal_pos, task_regression_weight
     )
-    t_old = _planner_path_selection_tuple(
-        best_info["path_waypoints"],
-        smoothness_weight,
-        robot,
-        best_info["goal_pos"],
-        task_regression_weight,
-    )
-    # Lexicographic on (cost, n_wp, jl); task_reg only affects cost
-    key_new = (t_new[0], t_new[1], t_new[2])
-    key_old = (t_old[0], t_old[1], t_old[2])
-    return key_new < key_old
+    entry = {
+        "path_waypoints": path,
+        "goal_pos": goal_pos,
+        "goal_orn": goal_orn,
+        "pick_tuple": pick_tuple,
+    }
+    key = _planner_path_rank_key(pick_tuple)
+    insert_idx = len(top_paths)
+    for j, existing in enumerate(top_paths):
+        if key < _planner_path_rank_key(existing["pick_tuple"]):
+            insert_idx = j
+            break
+    top_paths.insert(insert_idx, entry)
+    rank = insert_idx + 1
+    if len(top_paths) > max_k:
+        top_paths.pop()
+        return 0
+    return rank
 
 
 def save_rrt_path_to_hdf5(save_path, env_info, fail_mode, waypoints):
@@ -1259,6 +1276,20 @@ def tree_id_str_from_config(config: dict | None = None) -> str:
     cfg = config or CONFIG
     ts = cfg["tree_setup"]
     return f"{ts['tree_namespace']}_{ts['tree_type']}_{int(ts['tree_id']):05d}"
+
+
+def discover_available_tree_ids(tree_type: str = "envy", namespace: str = "LPy") -> list[int]:
+    """All exported PyBullet tree ids in the unlabeled meshes folder (LPy_envy_000XX.obj → XX)."""
+    from pybullet_tree_sim import MESHES_PATH
+
+    obj_dir = Path(MESHES_PATH) / "trees" / tree_type / "unlabeled" / "obj"
+    prefix = f"{namespace}_{tree_type}_"
+    ids: list[int] = []
+    for p in sorted(obj_dir.glob(f"{prefix}*.obj")):
+        digits = p.stem[len(prefix):]
+        if digits.isdigit():
+            ids.append(int(digits))
+    return sorted(set(ids))
 
 
 def apply_cli_config(args) -> None:
@@ -1597,12 +1628,14 @@ def run_planner_stage(num_apples_to_plan, run_id=None):
     tree_cfg = CONFIG['tree_setup']
     log.info(
         "VIZ_VALIDATE planner_config: hide_collision_visual=%s preserve_mtl=%s "
-        "env_markers=%s draw_goal_spheres=%s radius_m=%.3f offset_m=%.3f gui_refresh_steps=%s",
+        "env_markers=%s draw_goal_spheres=%s red_radius_m=%.3f blue_radius_m=%.3f "
+        "offset_m=%.3f gui_refresh_steps=%s",
         tree_cfg.get('hide_collision_visual'),
         resolve_preserve_export_mtl(tree_cfg),
         sim_cfg.get('draw_apple_centroid_markers'),
         vis_cfg.get('draw_goal_spheres'),
         float(vis_cfg.get('goal_sphere_radius', 0.08)),
+        float(vis_cfg.get('active_apple_sphere_radius', vis_cfg.get('goal_sphere_radius', 0.08))),
         float(vis_cfg.get('apple_marker_surface_offset_m', 0.12)),
         sim_cfg.get('gui_refresh_steps', 1),
     )
@@ -1659,6 +1692,7 @@ def run_planner_stage(num_apples_to_plan, run_id=None):
 
     robot_pos = np.asarray(CONFIG['robot_setup']['start_position'], dtype=np.float64)
     marker_radius = float(vis_cfg.get('goal_sphere_radius', 0.08))
+    active_marker_radius = float(vis_cfg.get('active_apple_sphere_radius', marker_radius))
     marker_offset_m = float(vis_cfg.get('apple_marker_surface_offset_m', 0.12))
 
     apple_sphere_ids = []
@@ -1697,18 +1731,45 @@ def run_planner_stage(num_apples_to_plan, run_id=None):
         ik_attempts = 0
         log.info(f"--- Processing Apple #{i+1}/{len(apples_to_process)} ---")
         current_apple_sphere_id = apple_sphere_ids[i] if i < len(apple_sphere_ids) else -1
-        if current_apple_sphere_id != -1:
-            change_sphere_color(pb_client, current_apple_sphere_id, vis_cfg['active_apple_color'])
+        if current_apple_sphere_id != -1 and i < len(planner_marker_positions):
+            apple_sphere_ids[i] = replace_debug_sphere(
+                pb_client,
+                current_apple_sphere_id,
+                planner_marker_positions[i],
+                active_marker_radius,
+                vis_cfg['active_apple_color'],
+            )
             gui_refresh(pb_client, sim_cfg.get('renders', False), steps=int(sim_cfg.get('gui_refresh_steps', 1)))
 
         robot.set_joint_angles_no_collision(initial_robot_q)
-        path_found, shortest_path_info = False, None
+        top_paths: list[dict] = []
+        max_top_paths = max(1, int(planning_cfg.get("num_top_paths_to_save_per_apple", 1)))
         pick_w = float(planning_cfg.get("path_selection_smoothness_weight", 0.1))
         pick_task_w = float(planning_cfg.get("path_selection_task_regression_weight", 0.0))
         save_refined = bool(planning_cfg.get("save_refined_waypoints_to_hdf5", True))
         gcam_cfg = planning_cfg.get("goal_camera_filter", {})
         gcam_enabled = bool(gcam_cfg.get("enable", False))
+        ik_pool = int(planning_cfg["num_goal_candidates_to_try"])
+        max_rrt_on_filtered = int(
+            gcam_cfg.get("num_camera_filtered_goal_candidates_to_try", 10)
+        )
+        apply_rrt_cap = gcam_enabled and camera_sensor_obj is not None
+        filtered_rrt_count = 0
         log.info(f"Goal camera filter (pre-RRT) : {gcam_enabled}")
+        if gcam_enabled:
+            log.info(
+                "Goal camera filter budgets: IK pool=%d (num_goal_candidates_to_try)  "
+                "max RRT on filter-passed=%d",
+                ik_pool,
+                max_rrt_on_filtered,
+            )
+            if apply_rrt_cap and ik_pool < max_rrt_on_filtered:
+                log.warning(
+                    "IK pool (%d) < max RRT on filter-passed (%d); "
+                    "raise planning.num_goal_candidates_to_try (e.g. 200).",
+                    ik_pool,
+                    max_rrt_on_filtered,
+                )
         ik_gen = get_ik_solutions_for_apple(robot, 
                                             is_state_valid_fn, 
                                             apple_center, None, 
@@ -1778,6 +1839,16 @@ def run_planner_stage(num_apples_to_plan, run_id=None):
                     if not gres.passed:
                         stats.goal_camera_filter_rejections += 1
                         continue
+                    if filtered_rrt_count >= max_rrt_on_filtered:
+                        log.info(
+                            "GOAL_CAM_FILTER apple=%d/%d: reached max RRT on filter-passed (%d); "
+                            "stopping IK/RRT loop.",
+                            i + 1,
+                            len(apples_to_process),
+                            max_rrt_on_filtered,
+                        )
+                        break
+                    filtered_rrt_count += 1
             
             planner_type = CONFIG['planning'].get('planner_type', 'rrt_connect')
             planner_kwargs = dict(max_iterations=CONFIG['planning']['rrt_max_iterations'],
@@ -1797,105 +1868,169 @@ def run_planner_stage(num_apples_to_plan, run_id=None):
                 
             if path is not None:
                 log.info(f"RRT Path found with {len(path)} waypoints.")
-                
-                if _planner_path_is_better(
+                rank = _insert_top_planner_path(
+                    top_paths,
                     path,
-                    shortest_path_info,
+                    goal_pos_ik,
+                    target_orn_q,
+                    max_top_paths,
                     pick_w,
                     robot,
-                    goal_pos_ik,
                     pick_task_w,
-                ):
-                    shortest_path_info = {'path_waypoints': path, 'goal_pos': goal_pos_ik, 'goal_orn': target_orn_q}
-                    path_found = True
-                    t_sel = _planner_path_selection_tuple(path, pick_w, robot, goal_pos_ik, pick_task_w)
+                )
+                if rank > 0:
+                    t_sel = top_paths[rank - 1]["pick_tuple"]
                     log.info(
-                        "New best RRT candidate  pick_tuple=(cost=%.4f, n_wp=%d, joint_len=%.4f, task_reg_m=%.4f)  w_smooth=%.3f w_task=%.3f",
-                        t_sel[0], t_sel[1], t_sel[2], t_sel[3], pick_w, pick_task_w,
+                        "Top-path insert rank=%d/%d  pick_tuple=(cost=%.4f, n_wp=%d, joint_len=%.4f, task_reg_m=%.4f)  "
+                        "w_smooth=%.3f w_task=%.3f",
+                        rank,
+                        max_top_paths,
+                        t_sel[0],
+                        t_sel[1],
+                        t_sel[2],
+                        t_sel[3],
+                        pick_w,
+                        pick_task_w,
                     )
             else:
                 log.info(f"RRT Path Planning FAILED for this IK candidate.")
 
+        if apply_rrt_cap:
+            log.info(
+                "GOAL_CAM_FILTER apple=%d/%d summary: valid_ik=%d  filter-passed RRT runs=%d/%d",
+                i + 1,
+                len(apples_to_process),
+                ik_attempts,
+                filtered_rrt_count,
+                max_rrt_on_filtered,
+            )
+
         plan_time = time.perf_counter() - apple_start_time
+        path_found = len(top_paths) > 0
         waypoint_count = None
         joint_path_length = None
         smoothness_cost = None
-        refined_for_save: list | None = None
-        raw_wp_n = 0
-        pick_tuple_log: tuple[float, int, float, float] | None = None
+        failure_reason = None
 
-        if path_found and shortest_path_info is not None:
-            raw_path = shortest_path_info['path_waypoints']
-            raw_wp_n = len(raw_path)
-            pick_tuple_log = _planner_path_selection_tuple(
-                raw_path, pick_w, robot, shortest_path_info["goal_pos"], pick_task_w
-            )
+        if path_found:
+            best = top_paths[0]
+            best_pick = best["pick_tuple"]
             if save_refined:
-                refined_for_save = shortcut_and_refine_path(
+                best_refined = shortcut_and_refine_path(
                     robot,
-                    list(raw_path),
+                    list(best["path_waypoints"]),
                     extend_fn,
                     is_state_valid_fn,
                     planning_cfg['task_space_refinement_threshold'],
                     enable_smoothing=planning_cfg.get('enable_smoothing', True),
                 )
-                waypoint_count = len(refined_for_save)
-                joint_path_length = _compute_joint_path_length(refined_for_save)
-                smoothness_cost = _compute_smoothness_cost(refined_for_save)
+                waypoint_count = len(best_refined)
+                joint_path_length = _compute_joint_path_length(best_refined)
+                smoothness_cost = _compute_smoothness_cost(best_refined)
             else:
-                refined_for_save = list(raw_path)
-                waypoint_count = raw_wp_n
-                joint_path_length = _compute_joint_path_length(raw_path)
-                smoothness_cost = _compute_smoothness_cost(raw_path)
-            failure_reason = None
+                waypoint_count = len(best["path_waypoints"])
+                joint_path_length = _compute_joint_path_length(best["path_waypoints"])
+                smoothness_cost = _compute_smoothness_cost(best["path_waypoints"])
         else:
-            failure_reason = ("No feasible IK/collision-free goals" if ik_attempts == 0 else "RRT failed")
+            if apply_rrt_cap and ik_attempts > 0 and filtered_rrt_count == 0:
+                failure_reason = "All IK candidates failed goal camera filter"
+            elif ik_attempts == 0:
+                failure_reason = "No feasible IK/collision-free goals"
+            else:
+                failure_reason = "RRT failed"
 
         stats.record_apple(i + 1, path_found, ik_attempts, plan_time, waypoint_count,
                            joint_path_length, smoothness_cost, failure_reason)
 
         if path_found:
-
             robot_pos, robot_or = robot.get_current_pose(-1)
-            assert shortest_path_info is not None and refined_for_save is not None
-            env_info = {
-                'tree_id': int(tree.tree_id),
-                'tree_id_str': tree.id_str,
-                'tree_urdf': tree.urdf_path, 'tree_pos': tree.pos, 'tree_orientation': tree.orientation,
-                'tree_scale': tree.scale, 'robot_pos': robot_pos, 'robot_or': robot_or,
-                'apple_center': np.array(apple_center), 
-                'goal_pos': np.array(shortest_path_info['goal_pos']), 
-                'goal_orn': np.array(shortest_path_info['goal_orn']),
-                'n_waypoints_planner_raw': int(raw_wp_n),
-                'n_waypoints_saved': int(len(refined_for_save)),
-                'waypoints_saved_refined': bool(save_refined),
-                'path_pick_smoothness_weight': float(pick_w),
-                'path_pick_task_regression_weight': float(pick_task_w),
-                'path_pick_cost': float(pick_tuple_log[0]) if pick_tuple_log else 0.0,
-                'path_pick_tuple_n_wp': int(pick_tuple_log[1]) if pick_tuple_log else 0,
-                'path_pick_tuple_joint_len': float(pick_tuple_log[2]) if pick_tuple_log else 0.0,
-                'path_pick_task_regression_m': float(pick_tuple_log[3]) if pick_tuple_log else 0.0,
-                'success_pos_tolerance_m': float(planning_cfg['fk_pos_tolerance']),
-                'success_orn_tolerance_rad': float(planning_cfg['fk_orn_tolerance']),
-            }
-
-            if CONFIG['simulation_setup']['renders']:
-                    visualize_path(robot, refined_for_save, CONFIG['visualization']['path_visualization_delay'], camera_sensor_obj, pb_client)
             log.info(
-                "PLAN_SAVE_SUMMARY  apple=%d/%d  raw_wp=%d  saved_wp=%d  refined=%s  pick_cost=%.4f  saved_joint_len=%.3f  saved_smooth=%.4f",
-                i + 1, len(apples_to_process), raw_wp_n, len(refined_for_save), save_refined,
-                float(pick_tuple_log[0]) if pick_tuple_log else 0.0,
-                float(joint_path_length or 0.0),
-                float(smoothness_cost or 0.0),
+                "PLAN_SAVE apple=%d/%d  saving %d top path(s) (configured max=%d)",
+                i + 1,
+                len(apples_to_process),
+                len(top_paths),
+                max_top_paths,
             )
-                    
-            save_rrt_path_to_hdf5(CONFIG['output']['waypoints_hdf5_path'], env_info, ResultMode.SUCCESS, refined_for_save)
+            for rank, candidate in enumerate(top_paths, start=1):
+                raw_path = candidate["path_waypoints"]
+                raw_wp_n = len(raw_path)
+                pick_tuple_log = candidate["pick_tuple"]
+                if save_refined:
+                    refined_for_save = shortcut_and_refine_path(
+                        robot,
+                        list(raw_path),
+                        extend_fn,
+                        is_state_valid_fn,
+                        planning_cfg['task_space_refinement_threshold'],
+                        enable_smoothing=planning_cfg.get('enable_smoothing', True),
+                    )
+                else:
+                    refined_for_save = list(raw_path)
+
+                env_info = {
+                    'tree_id': int(tree.tree_id),
+                    'tree_id_str': tree.id_str,
+                    'tree_urdf': tree.urdf_path, 'tree_pos': tree.pos, 'tree_orientation': tree.orientation,
+                    'tree_scale': tree.scale, 'robot_pos': robot_pos, 'robot_or': robot_or,
+                    'apple_center': np.array(apple_center),
+                    'apple_index': int(i + 1),
+                    'goal_pos': np.array(candidate['goal_pos']),
+                    'goal_orn': np.array(candidate['goal_orn']),
+                    'path_rank': int(rank),
+                    'num_top_paths_configured': int(max_top_paths),
+                    'n_waypoints_planner_raw': int(raw_wp_n),
+                    'n_waypoints_saved': int(len(refined_for_save)),
+                    'waypoints_saved_refined': bool(save_refined),
+                    'path_pick_smoothness_weight': float(pick_w),
+                    'path_pick_task_regression_weight': float(pick_task_w),
+                    'path_pick_cost': float(pick_tuple_log[0]),
+                    'path_pick_tuple_n_wp': int(pick_tuple_log[1]),
+                    'path_pick_tuple_joint_len': float(pick_tuple_log[2]),
+                    'path_pick_task_regression_m': float(pick_tuple_log[3]),
+                    'success_pos_tolerance_m': float(planning_cfg['fk_pos_tolerance']),
+                    'success_orn_tolerance_rad': float(planning_cfg['fk_orn_tolerance']),
+                }
+
+                if CONFIG['simulation_setup']['renders'] and rank == 1:
+                    visualize_path(
+                        robot,
+                        refined_for_save,
+                        CONFIG['visualization']['path_visualization_delay'],
+                        camera_sensor_obj,
+                        pb_client,
+                    )
+                log.info(
+                    "PLAN_SAVE_SUMMARY  apple=%d/%d  rank=%d/%d  raw_wp=%d  saved_wp=%d  refined=%s  "
+                    "pick_cost=%.4f  saved_joint_len=%.3f  saved_smooth=%.4f",
+                    i + 1,
+                    len(apples_to_process),
+                    rank,
+                    len(top_paths),
+                    raw_wp_n,
+                    len(refined_for_save),
+                    save_refined,
+                    float(pick_tuple_log[0]),
+                    float(_compute_joint_path_length(refined_for_save)),
+                    float(_compute_smoothness_cost(refined_for_save)),
+                )
+                save_rrt_path_to_hdf5(
+                    CONFIG['output']['waypoints_hdf5_path'],
+                    env_info,
+                    ResultMode.SUCCESS,
+                    refined_for_save,
+                )
         else:
             log.warning(f"FAILED to find any valid RRT path for Apple #{i+1}.")
             save_rrt_path_to_hdf5(CONFIG['output']['waypoints_hdf5_path'], {'apple_center': np.array(apple_center)}, ResultMode.NO_PATH, [])
 
-        if current_apple_sphere_id != -1:
-            change_sphere_color(pb_client, current_apple_sphere_id, vis_cfg['goal_sphere_color'])
+        if i < len(apple_sphere_ids) and apple_sphere_ids[i] != -1 and i < len(planner_marker_positions):
+            apple_sphere_ids[i] = replace_debug_sphere(
+                pb_client,
+                apple_sphere_ids[i],
+                planner_marker_positions[i],
+                marker_radius,
+                vis_cfg['goal_sphere_color'],
+            )
 
     successful_apples = [apple for apple in stats.apples if apple['success']]
     avg_plan_time = (sum(apple['plan_time_sec'] for apple in successful_apples) / len(successful_apples)) if successful_apples else 0.0
@@ -2168,7 +2303,26 @@ if __name__ == "__main__":
     elif args.stage == 'planner':
         if args.planner_type:
             CONFIG['planning']['planner_type'] = args.planner_type
-        run_planner_stage(args.num_apples, args.run_id)
+        if args.tree_id is None:
+            ts = CONFIG['tree_setup']
+            tree_ids = discover_available_tree_ids(ts['tree_type'], ts['tree_namespace'])
+            if not tree_ids:
+                log.error("No exported trees found in meshes folder; nothing to plan.")
+            else:
+                log.info(
+                    "No --tree-id given; planning ALL %d discovered trees: %s",
+                    len(tree_ids), tree_ids,
+                )
+                for tid in tree_ids:
+                    CONFIG['tree_setup']['tree_id'] = tid
+                    per_run_id = (
+                        f"tree{tid:02d}" if args.run_id is None
+                        else f"{args.run_id}_tree{tid:02d}"
+                    )
+                    log.info("=== Planning tree_id=%d  run_id=%s ===", tid, per_run_id)
+                    run_planner_stage(args.num_apples, per_run_id)
+        else:
+            run_planner_stage(args.num_apples, args.run_id)
     elif args.stage == 'generator':
         run_generator_stage(args.run_id)
     elif args.stage is None:

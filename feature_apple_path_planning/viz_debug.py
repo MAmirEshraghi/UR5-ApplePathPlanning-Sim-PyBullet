@@ -57,6 +57,16 @@ def change_sphere_color(pb_client, sphere_id, color_rgba):
             log.error("VIZ_DEBUG change_sphere_color id=%s failed: %s", sphere_id, exc)
 
 
+def replace_debug_sphere(pb_client, sphere_id, position, radius, color_rgba):
+    """Remove old visual sphere and create a new one (PyBullet cannot resize spheres in place)."""
+    if sphere_id is not None and sphere_id >= 0:
+        try:
+            pb_client.removeBody(sphere_id)
+        except Exception as exc:
+            log.error("VIZ_DEBUG replace_debug_sphere remove id=%s failed: %s", sphere_id, exc)
+    return draw_debug_sphere(pb_client, position, radius, color_rgba)
+
+
 def gui_refresh(pb_client, renders: bool, steps: int = 1) -> None:
     """Step simulation so the GUI picks up new/updated bodies."""
     if not renders or steps <= 0:

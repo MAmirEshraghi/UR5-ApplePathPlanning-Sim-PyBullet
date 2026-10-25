@@ -1188,7 +1188,7 @@ def parse_args() -> argparse.Namespace:
 
     # ── controller knobs ──────────────────────────────────────────────────────
     p.add_argument(
-        "--step-scale", type=float, default=0.3,
+        "--step-scale", type=float, default=1.4,
         help="EE-velocity action scale after Jacobian conversion (default 0.3).",
     )
     p.add_argument(
@@ -1315,6 +1315,7 @@ def main() -> None:
             log.error("Optical flow init failed: %s — using zeros.", exc)
 
     # ── build env once ────────────────────────────────────────────────────────
+    dg.CONFIG["simulation_setup"]["draw_apple_centroid_markers"] = True
     env = ApplePickingEnv(config=dg.CONFIG)
     if bool(env.robot.robot_conf.get("disable_self_collisions", False)):
         log.warning(

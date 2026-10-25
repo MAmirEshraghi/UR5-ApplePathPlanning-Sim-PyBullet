@@ -23,6 +23,8 @@ Example:
 
     python lpy_treesim/export_pybullet_tree_v2.py --tree-id 12 --lpy-index 12 --regenerate-urdf
 
+    python lpy_treesim/export_pybullet_tree_v2.py --range 0-4 --regenerate-urdf
+
     PYTHONPATH=. python feature_apple_path_planning/playground/tests/run_sim_tree_viewer.py \\
         --tree-id 12 --texture --preserve-export-mtl --hold-gui
 """
@@ -501,12 +503,32 @@ def export_one_tree(
     return result
 
 
+def parse_tree_range(value: str) -> list[int]:
+    parts = value.split("-", 1)
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise argparse.ArgumentTypeError(f"expected START-END, got {value!r}")
+    try:
+        start, end = int(parts[0]), int(parts[1])
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected START-END, got {value!r}") from exc
+    if start > end:
+        raise argparse.ArgumentTypeError(f"start must be <= end ({start} > {end})")
+    return list(range(start, end + 1))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--tree-id", type=int, help="Sim tree ID (e.g. 12)")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--tree-id", type=int, help="Sim tree ID (e.g. 12)")
+    mode.add_argument(
+        "--range",
+        type=parse_tree_range,
+        metavar="START-END",
+        help="Contiguous sim tree IDs (e.g. 0-4)",
+    )
     p.add_argument("--lpy-index", type=int, help="LPY tree_N index (default: --tree-id)")
     p.add_argument("--namespace", default="LPy")
     p.add_argument("--tree-type", default="envy")
@@ -553,21 +575,30 @@ def main(argv: list[str] | None = None) -> int:
         log.info("Batch complete: %d trees", len(indices))
         return 0
 
-    if args.tree_id is None:
-        parser.error("Provide --tree-id or use --batch / --batch-labeled")
+    if args.tree_id is None and args.range is None:
+        parser.error("Provide --tree-id, --range, or use --batch / --batch-labeled")
         return 2
 
-    lpy_index = args.lpy_index if args.lpy_index is not None else args.tree_id
-    export_one_tree(
-        args.tree_id,
-        lpy_index,
-        namespace=args.namespace,
-        tree_type=args.tree_type,
-        labeled=labeled,
-        unlabeled=unlabeled,
-        regenerate_urdf=args.regenerate_urdf,
-        dry_run=args.dry_run,
-    )
+    if args.range is not None and args.lpy_index is not None:
+        parser.error("--lpy-index is only valid with --tree-id")
+        return 2
+
+    tree_ids = args.range if args.range is not None else [args.tree_id]
+    for tree_id in tree_ids:
+        lpy_index = args.lpy_index if args.lpy_index is not None else tree_id
+        export_one_tree(
+            tree_id,
+            lpy_index,
+            namespace=args.namespace,
+            tree_type=args.tree_type,
+            labeled=labeled,
+            unlabeled=unlabeled,
+            regenerate_urdf=args.regenerate_urdf,
+            dry_run=args.dry_run,
+        )
+
+    if len(tree_ids) > 1:
+        log.info("Export complete: %d trees (%d-%d)", len(tree_ids), tree_ids[0], tree_ids[-1])
     return 0
 
 

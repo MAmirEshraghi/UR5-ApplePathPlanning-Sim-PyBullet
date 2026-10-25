@@ -18,6 +18,7 @@ from sb3_contrib.common.recurrent.policies import RecurrentActorCriticPolicy
 from sb3_contrib.common.recurrent.type_aliases import RNNStates
 # from sb3_contrib.ppo_recurrent.policies import CnnLstmPolicy, MlpLstmPolicy, MultiInputLstmPolicy
 from stable_baselines3.common.buffers import RolloutBuffer
+from apple_picking_sb3.pruning_gym.callbacks.train_callbacks import iter_all_callbacks
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.logger import Image
 from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
@@ -697,6 +698,7 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
     def __init__(self, path_trajectories, use_online_data, use_offline_data, use_ppo_offline, use_online_bc, use_awac,
                  algo_size, bc_coeff, use_cached_optical_flow,
                  *args, **kwargs):
+        self.bc_only = bool(kwargs.pop("bc_only", False))
         if "_init_setup_model" in kwargs:
             super().__init__(*args, **kwargs)
         else:
@@ -712,6 +714,8 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
         self.use_cached_optical_flow = use_cached_optical_flow
 
         self.collect_online_data = self.use_online_data or self.use_ppo_offline or self.use_online_bc or self.use_awac
+        if self.bc_only:
+            self.collect_online_data = False
         self.collect_offline_data = self.use_offline_data or self.use_ppo_offline or self.use_awac or self.use_online_bc
 
         self.path_trajectories = path_trajectories
@@ -738,6 +742,7 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
 
     def _setup_model(self) -> None:
         super()._setup_model()
+        self.policy.use_cached_optical_flow = self.use_cached_optical_flow
         # self.expert_buffer = copy.deepcopy(self.rollout_buffer)  # Same structure as rollout buffer
         # No copy, only freedom
         self.num_expert_envs = self.n_envs
@@ -969,6 +974,20 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
 
     def train_online_bc(self, batch_online, batch_offline, clip_range, clip_range_vf):
         # Train on online data using PPO and offline data using BC
+        if getattr(self, "bc_only", False):
+            if self.verbose > 1:
+                print("INFO: Training BC only")
+            bc_loss = self.policy.bc_action_mse(
+                batch_offline.observations,
+                batch_offline.lstm_states,
+                batch_offline.episode_starts,
+                batch_offline.actions,
+            )
+            offline_loss = bc_loss * self.bc_coeff
+            offline_loss_dict = {"bc_loss": bc_loss.item(), "offline_loss": offline_loss.item()}
+            online_loss = th.zeros(1, device=self.device)
+            return online_loss, {}, offline_loss, offline_loss_dict
+
         if self.verbose > 1:
             print("INFO: Training BC + PPO")
         actions_online = batch_online.actions
@@ -1035,14 +1054,12 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
 
         # behavior cloning loss  for offline data
         # Run policy on offline data
-        _, log_prob_offline, _, _ = self.policy.forward_expert(
+        bc_loss = self.policy.bc_action_mse(
             batch_offline.observations,
             batch_offline.lstm_states,
             batch_offline.episode_starts,
-            batch_offline.actions
+            batch_offline.actions,
         )
-
-        bc_loss = -th.mean(log_prob_offline)
         # Constant BC weight (was × progress_remaining, which faded imitation to ~0 by end of training).
         offline_loss = bc_loss * self.bc_coeff
 
@@ -1457,13 +1474,13 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
                     self.step_optimizer()
 
                 elif self.use_online_bc:
-                    # Uses PPO on online data and BC on offline data
+                    # Uses PPO on online data and BC on offline data (--bc_only skips PPO backward)
                     (loss_online, online_loss_dict, loss_offline, offline_loss_dict) = self.train_online_bc(
                         online_data, offline_data, clip_range, clip_range_vf)
                     loss_offline.backward()
-                    # For BC loss remove variance from the optimization
                     self.policy.optimizer_logstd.zero_grad()
-                    loss_online.backward()
+                    if not getattr(self, "bc_only", False):
+                        loss_online.backward()
                     self.step_optimizer()
 
                 elif self.use_awac:
@@ -1606,9 +1623,11 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
         print("Learning with Offline Data", self.use_offline_data)
         print("Learning with PPO Offline", self.use_ppo_offline)
         print("Learning with AWAC", self.use_awac)
+        if getattr(self, "bc_only", False) and self.verbose > 0:
+            print("INFO: bc_only=True — expert BC only, no sim rollouts / no PPO backward")
         while self.num_timesteps < total_timesteps:
-            # If timesteps > half of total timesteps, start using only online data
-            # if self.num_timesteps > total_timesteps / 2:
+            # # If timesteps > half of total timesteps, start using only online data
+            # if self.num_timesteps > total_timesteps / 4:
             #     print("**********Switching to Online Data**********")
             #     print("**********Switching to Online Data**********")
             #     self.use_online_data = True
@@ -1618,7 +1637,14 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
             #     self.collect_online_data = True
             #     self.collect_offline_data = False
             
-            if self.use_online_data or self.use_ppo_offline or self.use_online_bc or self.use_awac:
+            if getattr(self, "bc_only", False):
+                continue_training = True
+                self.num_timesteps += self.n_steps
+                if callback is not None:
+                    for cb in iter_all_callbacks(callback):
+                        if hasattr(cb, "maybe_save_timestep_milestone"):
+                            cb.maybe_save_timestep_milestone()
+            elif self.use_online_data or self.use_ppo_offline or self.use_online_bc or self.use_awac:
                 continue_training = self.collect_rollouts(self.env, callback, self.rollout_buffer,
                                                           n_rollout_steps=self.n_steps)
 
@@ -1755,18 +1781,32 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
             if "env" in data:
                 env = data["env"]
 
+        # Required by __init__ before __dict__.update(data); prefer explicit load kwargs over zip.
+        _algo_size = kwargs.pop("algo_size", data.get("algo_size", (224, 224)))
+        _bc_coeff = kwargs.pop("bc_coeff", data.get("bc_coeff", 2.0))
+        _use_cached_optical_flow = kwargs.pop(
+            "use_cached_optical_flow", data.get("use_cached_optical_flow", True)
+        )
+        _bc_only = kwargs.pop("bc_only", data.get("bc_only", False))
+        _explicit_expert_hdf5 = path_trajectories
+        if path_trajectories is None:
+            path_trajectories = data.get("path_trajectories")
+
         # pytype: disable=not-instantiable,wrong-keyword-args
         model = cls(
-
             path_trajectories=path_trajectories,
             use_awac=use_awac,
             use_online_data=use_online_data,
             use_offline_data=use_offline_data,
             use_online_bc=use_online_bc,
             use_ppo_offline=use_ppo_offline,
+            algo_size=_algo_size,
+            bc_coeff=_bc_coeff,
+            use_cached_optical_flow=_use_cached_optical_flow,
             policy=data["policy_class"],
             env=env,
             device=device,
+            bc_only=_bc_only,
             _init_setup_model=False,  # type: ignore[call-arg]
         )
         # pytype: enable=not-instantiable,wrong-keyword-args
@@ -1774,16 +1814,60 @@ class RecurrentPPOAEWithExpert(RecurrentPPOAE):
         # load parameters
         model.__dict__.update(data)
         model.__dict__.update(kwargs)
+        if _explicit_expert_hdf5 is not None:
+            ckpt_path = model.path_trajectories
+            model.path_trajectories = os.path.abspath(os.path.expanduser(_explicit_expert_hdf5))
+            if model.verbose > 0 and ckpt_path != model.path_trajectories:
+                print(
+                    f"INFO: expert HDF5 override: {model.path_trajectories} "
+                    f"(checkpoint had {ckpt_path})",
+                    flush=True,
+                )
+        model.use_cached_optical_flow = _use_cached_optical_flow
+        model.bc_only = _bc_only
+        if _bc_only:
+            model.collect_online_data = False
+        else:
+            model.collect_online_data = (
+                model.use_online_data
+                or model.use_ppo_offline
+                or model.use_online_bc
+                or model.use_awac
+            )
         model._setup_model()
+
+        # Lazy feature projections are created on first forward during training; restore
+        # modules from checkpoint shapes so set_parameters can load their weights.
+        policy_params = params.get("policy")
+        if policy_params is not None:
+            for name in ("actor_feature_proj", "critic_feature_proj"):
+                w_key = f"{name}.weight"
+                if w_key not in policy_params:
+                    continue
+                w = policy_params[w_key]
+                if getattr(model.policy, name, None) is None:
+                    model.policy.add_module(name, th.nn.Linear(int(w.shape[1]), int(w.shape[0])))
+                else:
+                    proj = getattr(model.policy, name)
+                    if not isinstance(proj, th.nn.Linear) or proj.in_features != int(w.shape[1]):
+                        model.policy.add_module(name, th.nn.Linear(int(w.shape[1]), int(w.shape[0])))
 
         try:
             # put state_dicts back in place
             model.set_parameters(params, exact_match=True, device=device)
-        except RuntimeError as e:
-            # Patch to load Policy saved using SB3 < 1.7.0
-            # the error is probably due to old policy being loaded
-            # See https://github.com/DLR-RM/stable-baselines3/issues/1233
-            if "pi_features_extractor" in str(e) and "Missing key(s) in state_dict" in str(e):
+        except (RuntimeError, ValueError) as e:
+            err = str(e)
+            if "parameter group" in err:
+                if policy_params is not None:
+                    model.policy.load_state_dict(policy_params, strict=False)
+                else:
+                    params_no_opt = {k: v for k, v in params.items() if "optimizer" not in k}
+                    model.set_parameters(params_no_opt, exact_match=False, device=device)
+                warnings.warn(
+                    "Skipped optimizer state load (param-group mismatch with checkpoint). "
+                    "Policy weights loaded; safe for eval. Retrain/resume will rebuild optimizer."
+                )
+            elif "pi_features_extractor" in err and "Missing key(s) in state_dict" in err:
                 model.set_parameters(params, exact_match=False, device=device)
                 warnings.warn(
                     "You are probably loading a model saved with SB3 < 1.7.0, "

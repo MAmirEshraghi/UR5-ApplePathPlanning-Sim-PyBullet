@@ -178,7 +178,11 @@ class ApplePickingEnv(gym.Env):
         self._draw_apple_centroid_markers = bool(
             sim_conf.get('draw_apple_centroid_markers', True)
         )
+        self._draw_trajectory_target_markers = bool(
+            sim_conf.get('draw_trajectory_target_markers', False)
+        )
         self._apple_debug_body_ids = []
+        self._trajectory_marker_body_ids = []
         robot_conf = self.config['robot_setup']
         planning_conf = self.config['planning']
 
@@ -228,6 +232,7 @@ class ApplePickingEnv(gym.Env):
         self.start_dist_to_goal = 0.0
         self.home_joint_angles = robot_conf['start_joint_angles']
         self.init_pos_ee, self.init_or_ee = self.robot.get_current_pose(self.robot.tool0_link_idx)
+        self._loaded_tree_signature = None
         self.reset_env_variables()
 
 
@@ -326,6 +331,51 @@ class ApplePickingEnv(gym.Env):
             steps=int(self.config["simulation_setup"].get("gui_refresh_steps", 1)),
         )
 
+    def _clear_trajectory_target_markers(self) -> None:
+        for bid in self._trajectory_marker_body_ids:
+            if bid is not None and bid >= 0:
+                try:
+                    self.pb_client.removeBody(bid)
+                except Exception:
+                    pass
+        self._trajectory_marker_body_ids = []
+
+    def _refresh_trajectory_target_markers(self) -> None:
+        """Blue sphere on target apple + marker at pre-grasp (reward goal); cleared each reconfigure."""
+        from feature_apple_path_planning.viz_debug import (
+            apple_marker_surface_position,
+            draw_debug_sphere,
+            gui_refresh,
+        )
+
+        self._clear_trajectory_target_markers()
+        if not self._draw_trajectory_target_markers:
+            return
+
+        vis = self.config.get("visualization", {})
+        offset_m = float(vis.get("apple_marker_surface_offset_m", 0.12))
+        robot_pos = np.asarray(self.config["robot_setup"]["start_position"], dtype=np.float64)
+
+        apple_radius = float(vis.get("active_apple_sphere_radius", 0.053))
+        apple_color = list(vis.get("active_apple_color", [0.0, 0.0, 1.0, 0.9]))
+        apple_centroid = np.asarray(self.desired_goal, dtype=np.float64).reshape(3)
+        apple_pos = apple_marker_surface_position(apple_centroid, robot_pos, offset_m)
+        apple_id = draw_debug_sphere(self.pb_client, apple_pos, apple_radius, apple_color)
+
+        pregrasp_radius = float(vis.get("pregrasp_sphere_radius", 0.04))
+        pregrasp_color = list(vis.get("pregrasp_marker_color", [0.0, 1.0, 1.0, 0.9]))
+        pregrasp_pos = np.asarray(self.reward_goal, dtype=np.float64).reshape(3)
+        pregrasp_id = draw_debug_sphere(
+            self.pb_client, pregrasp_pos, pregrasp_radius, pregrasp_color
+        )
+
+        self._trajectory_marker_body_ids = [apple_id, pregrasp_id]
+        gui_refresh(
+            self.pb_client,
+            self.config["simulation_setup"].get("renders", False),
+            steps=int(self.config["simulation_setup"].get("gui_refresh_steps", 1)),
+        )
+
     def reset_env_variables(self):
         """Resets variables that change within an episode."""
         self.step_counter = 0
@@ -404,7 +454,10 @@ class ApplePickingEnv(gym.Env):
         # and is *already* in the correct (C, H, W) format.
         # If it's the first step, create a zero-array with the correct (C, H, W) shape.
         cam_height, cam_width = self.camera_sensor.depth_height, self.camera_sensor.depth_width
-        previous_rgb_chw = self.observation.get('rgb', np.zeros((3, cam_height, cam_width), dtype=np.uint8))
+        if self.step_counter == 0 or "rgb" not in self.observation:
+            previous_rgb_chw = current_rgb_chw.copy()
+        else:
+            previous_rgb_chw = self.observation["rgb"]
 
         # 3. Process other data for reward calculation and observation ---
         # The `prev_observation_info` is needed for calculating rewards based on the previous state.
@@ -639,8 +692,9 @@ class ApplePickingEnv(gym.Env):
 
         collision_penalty = 0.0
         if collision_unacceptable:
-            collision_penalty = -1.0
-        
+            # #tier1-30k: was -1.0; 30k run had collision_rate~100% — stronger signal before terminate
+            collision_penalty = -5.0
+
         reward += collision_penalty
         reward_info['collision_penalty'] = collision_penalty
         reward_info['self_collision_unacceptable'] = bool(
@@ -651,7 +705,8 @@ class ApplePickingEnv(gym.Env):
         success_reward = 0.0
         if dist_to_goal < self.distance_threshold:
             self.is_goal_state = True
-            success_reward = 1.0
+            # #tier1-30k: was +1.0; sparse vs distance*100 — boost so PPO values reaching goal
+            success_reward = 20.0
         reward += success_reward
         reward_info['success_reward'] = success_reward
 
@@ -696,11 +751,43 @@ class ApplePickingEnv(gym.Env):
 
         return terminated, terminate_info
 
-    def reconfigure_scene(self, metadata: dict):
-        """
-        Resets the simulation and reconfigures the robot and tree to match
-        the provided metadata from an expert trajectory.
-        """
+    @staticmethod
+    def _tree_signature_from_metadata(metadata: dict, config: dict) -> tuple:
+        tree_scale = float(np.asarray(metadata["tree_scale"], dtype=np.float64).reshape(-1)[0])
+        tree_pos = tuple(np.round(np.asarray(metadata["tree_pos"], dtype=np.float64).reshape(3), 6))
+        tree_or = tuple(np.round(np.asarray(metadata["tree_orientation"], dtype=np.float64).reshape(4), 6))
+        meta_tree_id = metadata.get("tree_id")
+        if meta_tree_id is not None:
+            tree_id = int(np.asarray(meta_tree_id, dtype=np.int64).reshape(-1)[0])
+        else:
+            tree_id = int(config["tree_setup"]["tree_id"])
+        return (tree_id, tree_scale, tree_pos, tree_or)
+
+    def _set_robot_from_metadata(self, metadata: dict) -> None:
+        meta_q = metadata.get("initial_joint_angles")
+        if meta_q is not None:
+            q = np.asarray(meta_q, dtype=np.float64).reshape(-1).tolist()
+            self.robot.set_joint_angles_no_collision(q)
+        else:
+            self.robot.set_joint_angles_no_collision(self.home_joint_angles)
+        self.init_pos_ee, self.init_or_ee = self.robot.get_current_pose(self.robot.tool0_link_idx)
+
+    def _apply_trajectory_goals(self, metadata: dict) -> None:
+        goal_pos = np.asarray(metadata["goal_pos"], dtype=np.float64).reshape(3)
+        if metadata.get("apple_center") is not None:
+            self.desired_goal = np.asarray(metadata["apple_center"], dtype=np.float64).reshape(3)
+        else:
+            self.desired_goal = goal_pos.copy()
+        self.reward_goal = goal_pos.copy()
+        self._refresh_trajectory_target_markers()
+
+    def _reconfigure_scene_fast(self, metadata: dict) -> None:
+        """Same tree already loaded — reset arm + goal only (skip PyBullet full reload)."""
+        self._set_robot_from_metadata(metadata)
+        self._apply_trajectory_goals(metadata)
+
+    def _reconfigure_scene_full(self, metadata: dict) -> None:
+        """Full PyBullet reset and reload robot + tree from trajectory metadata."""
         sim_setup = self.config["simulation_setup"]
         self.pbutils.reset_simulation_scene(
             gravity=sim_setup["gravity"],
@@ -711,26 +798,32 @@ class ApplePickingEnv(gym.Env):
         robot_quat = Rotation.from_euler(
             'xyz', robot_conf['start_orientation_euler_deg'], degrees=True
         ).as_quat()
+        cached_robot_urdf = os.path.join(URDF_PATH, "tmp", "robot.urdf")
+        regenerate_robot_urdf = robot_conf.get("regenerate_urdf")
+        if regenerate_robot_urdf is None:
+            regenerate_robot_urdf = not os.path.isfile(cached_robot_urdf)
         self.robot = Robot(
             pbclient=self.pb_client,
             position=robot_conf['start_position'],
             orientation=robot_quat,
+            regenerate_urdf=regenerate_robot_urdf,
         )
 
-        meta_q = metadata.get('initial_joint_angles')
-        if meta_q is not None:
-            q = np.asarray(meta_q, dtype=np.float64).reshape(-1).tolist()
-            self.robot.set_joint_angles_no_collision(q)
-        else:
-            self.robot.set_joint_angles_no_collision(self.home_joint_angles)
+        self._set_robot_from_metadata(metadata)
 
         tree_scale = float(np.asarray(metadata['tree_scale'], dtype=np.float64).reshape(-1)[0])
         tree_pos = np.asarray(metadata['tree_pos'], dtype=np.float64).reshape(3)
         tree_or = np.asarray(metadata['tree_orientation'], dtype=np.float64).reshape(4)
 
+        meta_tree_id = metadata.get('tree_id')
+        if meta_tree_id is not None:
+            tree_id = int(np.asarray(meta_tree_id, dtype=np.int64).reshape(-1)[0])
+        else:
+            tree_id = int(self.config['tree_setup']['tree_id'])
+
         self.tree = Tree(
             pbutils=self.pbutils,
-            tree_id=self.config['tree_setup']['tree_id'],
+            tree_id=tree_id,
             tree_type=self.config['tree_setup']['tree_type'],
             namespace=self.config['tree_setup']['tree_namespace'],
             scale=tree_scale,
@@ -759,8 +852,7 @@ class ApplePickingEnv(gym.Env):
             globalScaling=self.tree.scale,
         )
         self.tree.build_collision_kdtree()
-        self.desired_goal = np.asarray(metadata['goal_pos'], dtype=np.float64).reshape(3)
-        self.reward_goal = self.desired_goal.copy()
+        self._apply_trajectory_goals(metadata)
         self.apple_centroids = self.tree.get_apple_centroids()
         self._refresh_apple_debug_markers()
         if self.pbutils.renders:
@@ -770,5 +862,29 @@ class ApplePickingEnv(gym.Env):
                 self.config["simulation_setup"],
             )
 
+    def reconfigure_scene(self, metadata: dict):
+        """
+        Reconfigure robot and tree to match expert trajectory metadata.
+        Uses a fast path when the tree signature is unchanged (same tree, new goal).
+        """
+        sim_setup = self.config["simulation_setup"]
+        use_fast = bool(sim_setup.get("fast_same_tree_reconfigure", True))
+        sig = self._tree_signature_from_metadata(metadata, self.config)
+        can_fast = (
+            use_fast
+            and self._loaded_tree_signature is not None
+            and sig == self._loaded_tree_signature
+            and getattr(self, "robot", None) is not None
+            and getattr(self, "tree", None) is not None
+        )
+        if can_fast:
+            self._reconfigure_scene_fast(metadata)
+            log.info("[env:reconfigure] mode=fast tree_id=%s", sig[0])
+        else:
+            self._reconfigure_scene_full(metadata)
+            self._loaded_tree_signature = sig
+            log.info("[env:reconfigure] mode=full tree_id=%s", sig[0])
+
     def close(self):
+        self._clear_trajectory_target_markers()
         self.pb_client.disconnect()

@@ -572,8 +572,10 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         self.shared_lstm = shared_lstm
         self.enable_critic_lstm = enable_critic_lstm
         self.use_optical_flow = use_optical_flow
-        self.actor_feature_proj = None
-        self.critic_feature_proj = None
+        self.algo_size = algo_size
+        self.actor_feature_proj, self.critic_feature_proj = self._build_feature_projections(
+            observation_space
+        )
         self.lstm_actor = nn.LSTM(
             self.features_dim,
             lstm_hidden_size,
@@ -585,7 +587,6 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         self.lstm_hidden_state_shape = (n_lstm_layers, 1, lstm_hidden_size)
         self.critic = None
         self.lstm_critic = None
-        self.algo_size = algo_size
         assert not (
                 self.shared_lstm and self.enable_critic_lstm
         ), "You must choose between shared LSTM, seperate or no LSTM for the critic."
@@ -615,21 +616,86 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         self.running_mean_var_oflow_x = RunningMeanStd(shape=(1,))
         self.running_mean_var_oflow_y = RunningMeanStd(shape=(1,))
 
+        proj_params = list(self.actor_feature_proj.parameters()) if isinstance(
+            self.actor_feature_proj, nn.Linear
+        ) else []
+        if isinstance(self.critic_feature_proj, nn.Linear):
+            proj_params.extend(self.critic_feature_proj.parameters())
         # Setup optimizer with initial learning rate
         if lr_schedule_logstd is not None:
             self.optimizer_logstd = self.optimizer_class([self.log_std], lr=lr_schedule_logstd(1),
                                                          **self.optimizer_kwargs)
             self.optimizer = self.optimizer_class(
                 [*self.lstm_actor.parameters(), *self.lstm_critic.parameters(), *self.value_net.parameters(),
-                 *self.action_net.parameters(), *self.mlp_extractor.parameters()], lr=lr_schedule(1), **self.optimizer_kwargs)
+                 *self.action_net.parameters(), *self.mlp_extractor.parameters(), *proj_params],
+                lr=lr_schedule(1), **self.optimizer_kwargs)
         else:
             self.optimizer = self.optimizer_class(
                 [*self.lstm_actor.parameters(), *self.lstm_critic.parameters(), *self.value_net.parameters(),
-                 *self.action_net.parameters(), *self.mlp_extractor.parameters(), self.log_std], lr=lr_schedule(1), **self.optimizer_kwargs)
+                 *self.action_net.parameters(), *self.mlp_extractor.parameters(), self.log_std, *proj_params],
+                lr=lr_schedule(1), **self.optimizer_kwargs)
             self.optimizer_logstd = None
         if lr_schedule_ae is not None:
             self.optimizer_ae = self.optimizer_class(self.features_extractor.parameters(), lr=lr_schedule_ae(1),
                                                      **self.optimizer_kwargs)
+
+    @staticmethod
+    def _tabular_obs_dim(observation_space: spaces.Space) -> int:
+        skip = {"rgb", "prev_rgb", "point_mask", "optical_flow"}
+        return sum(
+            observation_space[k].shape[0]
+            for k in sorted(observation_space.spaces.keys())
+            if k not in skip and not k.startswith("critic")
+        )
+
+    def _build_feature_projections(self, observation_space: spaces.Space):
+        """Eager Linear projections so weights save/load and train with the policy."""
+        tabular_dim = self._tabular_obs_dim(observation_space)
+        with th.no_grad():
+            probe = th.zeros(
+                1,
+                self.features_extractor.in_channels,
+                self.algo_size[0],
+                self.algo_size[1],
+                device=self.device,
+            )
+            encoder_dim = int(self.features_extractor(probe).shape[-1])
+        concat_dim = tabular_dim + encoder_dim
+        actor_proj = (
+            nn.Identity()
+            if concat_dim == self.features_dim
+            else nn.Linear(concat_dim, self.features_dim)
+        )
+        critic_proj = None
+        if not self.share_features_extractor and self.enable_critic_lstm:
+            critic_concat = concat_dim
+            if self.features_dim_critic_add is not None:
+                critic_concat += self.features_dim_critic_add
+            critic_in = (
+                self.features_dim
+                if self.features_dim_critic_add is None
+                else self.features_dim + self.features_dim_critic_add
+            )
+            critic_proj = (
+                nn.Identity()
+                if critic_concat == critic_in
+                else nn.Linear(critic_concat, critic_in)
+            )
+        return actor_proj, critic_proj
+
+    def load_state_dict(self, state_dict, strict=True):
+        for attr in ("actor_feature_proj", "critic_feature_proj"):
+            wkey = f"{attr}.weight"
+            if wkey not in state_dict:
+                continue
+            weight = state_dict[wkey]
+            proj = getattr(self, attr, None)
+            if isinstance(proj, nn.Linear) and proj.in_features == weight.shape[1] and proj.out_features == weight.shape[0]:
+                continue
+            if hasattr(self, attr):
+                delattr(self, attr)
+            self.add_module(attr, nn.Linear(weight.shape[1], weight.shape[0]))
+        return super().load_state_dict(state_dict, strict=strict)
 
     def _normalize_using_running_mean_std(self, x, mean_std_tuple):
         mean_x = mean_std_tuple[0].mean.to(self.device, dtype=th.float32)
@@ -770,7 +836,8 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         return actions, values, log_prob, RNNStates(lstm_states_pi, lstm_states_vf)
 
     def forward_expert(self, obs, lstm_states, episode_starts, action):
-        features = self.extract_features(obs, use_cached_optical_flow=True)
+        use_cached = getattr(self, "use_cached_optical_flow", True)
+        features = self.extract_features(obs, use_cached_optical_flow=use_cached)
 
         if self.share_features_extractor:
             pi_features = vf_features = features  # alis
@@ -799,6 +866,24 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         log_prob = distribution.log_prob(actions)
         return actions, values, log_prob, RNNStates(lstm_states_pi, lstm_states_vf)
 
+    def bc_action_mse(self, obs, lstm_states, episode_starts, expert_actions) -> th.Tensor:
+        """BC loss on squashed actions — avoids tanh log-det saturation gaming."""
+        use_cached = getattr(self, "use_cached_optical_flow", True)
+        features = self.extract_features(obs, use_cached_optical_flow=use_cached)
+        if self.share_features_extractor:
+            pi_features = vf_features = features
+        else:
+            pi_features, vf_features = features
+        latent_pi, _ = self._process_sequence(
+            pi_features, lstm_states.pi, episode_starts, self.lstm_actor
+        )
+        latent_pi = self.mlp_extractor.forward_actor(latent_pi)
+        distribution = self._get_action_dist_from_latent(latent_pi)
+        pred = distribution.get_actions(deterministic=True)
+        target = expert_actions
+        if target.ndim != pred.ndim:
+            target = target.view_as(pred)
+        return F.mse_loss(pred, target)
 
     def get_depth_proxy(self, rgb, prev_rgb, point_mask):
         optical_flow = self.optical_flow_model.calculate_optical_flow(rgb, prev_rgb)
@@ -870,19 +955,19 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         return features#, depth_proxy, image_features[1]
 
     def _project_features_if_needed(self, features: th.Tensor, target_dim: int, proj_attr: str) -> th.Tensor:
-        """Ensure feature dimension matches the expected LSTM input via a learnable linear projection."""
+        """Project concatenated obs features to LSTM input size."""
+        proj = getattr(self, proj_attr, None)
+        if isinstance(proj, nn.Identity):
+            return features
+        if isinstance(proj, nn.Linear):
+            if proj.in_features == features.shape[-1] and proj.out_features == target_dim:
+                return proj(features)
         current_dim = features.shape[-1]
         if current_dim == target_dim:
             return features
-        projection_layer = getattr(self, proj_attr, None)
-        if (
-            projection_layer is None
-            or projection_layer.in_features != current_dim
-            or projection_layer.out_features != target_dim
-        ):
-            projection_layer = nn.Linear(current_dim, target_dim).to(features.device)
-            setattr(self, proj_attr, projection_layer)
-        return projection_layer(features)
+        proj = nn.Linear(current_dim, target_dim).to(features.device)
+        self.add_module(proj_attr, proj)
+        return proj(features)
 
 
     def get_distribution(
@@ -901,7 +986,8 @@ class RecurrentActorCriticPolicy(ActorCriticPolicySquashed):
         :return: the action distribution and new hidden states.
         """
 
-        features = self.extract_features(obs)
+        use_cached = getattr(self, "use_cached_optical_flow", False)
+        features = self.extract_features(obs, use_cached_optical_flow=use_cached)
         if self.features_dim_critic_add is not None:
             actor_features = features[0]
         else:
