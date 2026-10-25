@@ -199,3 +199,6 @@ pybullet_tree_sim/textures/apple2/
 pybullet_tree_sim/textures/leaf2/
 pybullet_tree_sim/textures/sky.png
 pybullet_tree_sim/textures/orchard-sky.png
+
+# Old / redundant files staged for deletion (see archive4delete/MANIFEST.md)
+archive4delete/
