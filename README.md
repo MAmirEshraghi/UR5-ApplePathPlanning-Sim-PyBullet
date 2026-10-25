@@ -3,6 +3,15 @@
 > **Note (fork):** the apple-picking expert data generation and agent training code lives in [`agent/`](agent/README.md)
 > as a separate package (`apple_agent`). It is prepared to move into its own repository; the simulator stays here.
 
+### Fork additions
+- **Data root:** set `PYBULLET_TREE_SIM_DATA` to keep meshes, caches, textures and generated tree URDFs outside the
+  package (same layout: `meshes/`, `textures/`, `pkl/`, `urdf/`). Default: the package directory.
+- **Robot URDF:** `pybullet_tree_sim/urdf/tmp/robot.urdf` uses bundled meshes (`urdf/tmp/robot_meshes/`) by relative
+  path, so it loads without ROS. Regenerating it from xacro needs ROS 2 (and `branch_detection_ws`); the regenerated
+  file is bundled automatically (or run `python tools/bundle_robot_meshes.py`).
+- **Tree viewers:** `python tools/tree_viewers/run_sim_tree_viewer.py --tree-id 8 --texture --hold-gui`
+  (also `run_sim_tree_debug_viewer.py`, `run_ply_tree_viewer.py`).
+
 ## Using this package
 
 ### Installation
